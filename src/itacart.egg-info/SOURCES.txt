@@ -1,0 +1,8 @@
+LICENSE
+README.md
+pyproject.toml
+src/itacart/__init__.py
+src/itacart.egg-info/PKG-INFO
+src/itacart.egg-info/SOURCES.txt
+src/itacart.egg-info/dependency_links.txt
+src/itacart.egg-info/top_level.txt
