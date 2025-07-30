@@ -11,10 +11,7 @@ authors = [
 description = "An Equal-Area Parallelogram DGGS for Terrestrial Cadastral Mapping-Designed for Usability and Blockchain Integration."
 readme = "README.md"
 requires-python = ">=3.8"
-license = "MIT"
-license-files = [
-    "LICENSE",
-]
+license = { file = "LICENSE" }
 keywords = ["dggs", "gis", "geospatial", "cadastre", "blockchain", "sdi"]
 classifiers = [
     "Development Status :: 3 - Alpha",

@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: itacart
-Version: 0.1.0a1
+Version: 0.1.0a3
 Summary: An Equal-Area Parallelogram DGGS for Terrestrial Cadastral Mapping-Designed for Usability and Blockchain Integration.
 Author-email: ITACaRT <itacart@proton.me>
 License: MIT License
@@ -27,7 +27,6 @@ License: MIT License
 Keywords: dggs,gis,geospatial,cadastre,blockchain,sdi
 Classifier: Development Status :: 3 - Alpha
 Classifier: Intended Audience :: Science/Research
-Classifier: License :: OSI Approved :: MIT License
 Classifier: Topic :: Scientific/Engineering :: GIS
 Classifier: Programming Language :: Python :: 3
 Requires-Python: >=3.8
