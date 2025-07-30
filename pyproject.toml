@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "itacart"
-version = "0.1.0a2"
+version = "0.1.0a3"
 authors = [
   { name="ITACaRT", email="itacart@proton.me" },
 ]
@@ -19,7 +19,6 @@ keywords = ["dggs", "gis", "geospatial", "cadastre", "blockchain", "sdi"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Topic :: Scientific/Engineering :: GIS",
     "Programming Language :: Python :: 3",
 ]
