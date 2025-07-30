@@ -8,4 +8,4 @@ as described in the paper:
 http://mtc-m16c.sid.inpe.br/col/sid.inpe.br/mtc-m16c/2025/06.04.13.53/doc/thisInformationItemHomePage.html
 """
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"

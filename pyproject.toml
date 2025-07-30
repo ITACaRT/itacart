@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "itacart"
-version = "0.1.0a1"
+version = "0.1.0a2"
 authors = [
   { name="ITACaRT", email="itacart@proton.me" },
 ]
@@ -23,3 +23,5 @@ classifiers = [
     "Topic :: Scientific/Engineering :: GIS",
     "Programming Language :: Python :: 3",
 ]
+[tool.setuptools.packages.find]
+where = ["src"]
