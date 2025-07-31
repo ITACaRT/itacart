@@ -1,4 +1,4 @@
-# ITACaRT - v0.1.0a1
+# ITACaRT - v0.1.0a3
 
 **PyPI package name reserved. This is a placeholder for the official reference implementation.**
 
