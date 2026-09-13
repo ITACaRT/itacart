@@ -591,13 +591,23 @@ def get_children(
     Args:
         index: Compositional index string.
         target_res: Resolution to descend to. Defaults to one level down.
-        flatten: When the input holds several cells, ``False`` yields one
-            list per input cell, preserving positional alignment;
-            ``True`` yields a single flat stream.
+        flatten: ``False``, the default, yields one list per cell of the
+            input, preserving positional alignment. ``True`` yields a
+            single flat stream. The shape does not depend on how many
+            cells the input holds.
 
     Yields:
-        Child index strings, or lists of them when ``flatten`` is
-        ``False`` and the input is compositional.
+        Lists of child index strings, one list per cell of the input,
+        when ``flatten`` is ``False``; child index strings when it is
+        ``True``.
+
+        The grouping does not collapse for a single cell, and that is
+        worth stating because the neighbours do collapse:
+        :func:`get_parent` answers a scalar and :func:`get_ancestors`
+        answers a flat chain when handed one cell. Here
+        ``list(get_children(cell))`` is a list holding one list, whose
+        length is one and not the child count. Pass ``flatten=True`` to
+        read the children directly.
 
     Raises:
         MaxResolutionError: If ``target_res`` exceeds resolution 13.

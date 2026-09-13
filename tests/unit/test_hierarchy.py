@@ -540,6 +540,27 @@ class TestVectorisedSemantics:
         assert all(isinstance(group, list) for group in groups)
         assert all(len(group) == refinement_ratio(2) for group in groups)
 
+    def test_get_children_does_not_collapse_for_a_single_cell(self) -> None:
+        """The one member of this family that keeps its wrapper.
+
+        ``get_parent`` answers a scalar for one cell and ``get_ancestors``
+        answers a flat chain, both pinned above. ``get_children`` does
+        not follow them: unflattened it yields one list per input cell,
+        one list even when the input is one cell, so the stream has
+        length one and the children are inside it. The docstring says so
+        now; this is what makes it a claim rather than prose.
+        """
+        groups = list(hy.get_children(INTERIOR))
+        assert len(groups) == 1
+        assert isinstance(groups[0], list)
+        assert len(groups[0]) == refinement_ratio(2)
+        assert all(isinstance(cell, str) for cell in groups[0])
+
+        # The control: the same call flattened does collapse, so the
+        # assertion above is about the wrapper and not about the walk.
+        flat = list(hy.get_children(INTERIOR, flatten=True))
+        assert flat == groups[0]
+
     def test_get_children_flattened_yields_a_single_stream(self) -> None:
         composed = "NE(0500/0100),NE(0501/0100)"
         flat = list(hy.get_children(composed, flatten=True))

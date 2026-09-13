@@ -52,6 +52,8 @@ def generate(app: Sphinx) -> None:
     source_dir = Path(app.srcdir)
     root: Path = app.config.phase_figures_root
     titles: dict[str, str] = app.config.phase_figures_titles
+    provenance: dict[str, str] = app.config.phase_figures_provenance
+    default = "produced by the phase verification notebook"
     out = source_dir / GENERATED / PHASE_DIR
 
     if out.exists():
@@ -81,8 +83,9 @@ def generate(app: Sphinx) -> None:
         target.mkdir(parents=True, exist_ok=True)
         lines = [f"# {titles.get(phase.name, phase.name.upper())}", ""]
         lines.append(
-            f"{len(images)} figures, produced by the phase verification "
-            "notebook and discovered at build time."
+            f"{len(images)} figures, "
+            f"{provenance.get(phase.name, default)}, "
+            "discovered at build time."
         )
         lines.append("")
 
@@ -131,5 +134,9 @@ def generate(app: Sphinx) -> None:
 def setup(app: Sphinx) -> dict[str, Any]:
     app.add_config_value("phase_figures_root", Path("_static"), "env")
     app.add_config_value("phase_figures_titles", {}, "env")
+    # Where a gallery's figures came from. Not every gallery is a delivery
+    # phase, and a page that claims the wrong provenance is worse than one
+    # that claims none.
+    app.add_config_value("phase_figures_provenance", {}, "env")
     app.connect("builder-inited", generate)
     return {"version": "1.0", "parallel_read_safe": True}

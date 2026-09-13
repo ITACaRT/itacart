@@ -12,34 +12,39 @@ mapping, tessellated directly on the WGS84 ellipsoid.
    cell = itacart.geo_to_cell(-46.6328862, -23.5508962, resolution=13)
    lon, lat = itacart.cell_to_centroid(cell)
 
+.. Every document below appears in exactly one toctree. A document listed
+   twice is reported at "checking consistency" and produces a duplicated
+   sidebar entry, so a new page goes in one place and is cross-referenced
+   from the others.
+
 .. toctree::
-   :maxdepth: 2
-   :caption: Guide
+   :maxdepth: 3
+   :caption: Getting Started
+
+   getting_started/index
+
+.. toctree::
+   :maxdepth: 3
+   :caption: Concepts & Guides
 
    concepts/index
-   concepts/resolutions
-   concepts/indexing
-   concepts/boundary
-   concepts/conformance
-   concepts/binary_encoding_spec
-   concepts/geometry_encoding_spec
 
 .. toctree::
    :maxdepth: 2
-   :caption: Reference
+   :caption: API Reference
 
    api/index
 
-.. toctree::
-   :maxdepth: 2
-   :caption: Contents
+.. The phase galleries are organised by the development phase that produced
+   each figure, which is how the work was done rather than how the grid is
+   learned. They stay built and linkable — the concept pages reference the
+   figures they need — but they are not a section a reader navigates by, so
+   they are not in the sidebar.
 
-   concepts/index
-   api/index
+.. toctree::
+   :hidden:
+
    _generated/figures/index
-   building
-   changelog
-   citing
 
 Citing
 ------

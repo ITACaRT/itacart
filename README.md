@@ -1,12 +1,19 @@
-# ITACaRT
+<p align="center">
+  <img src="https://raw.githubusercontent.com/itacart/itacart/main/docs/_static/logo.png"
+       alt="ITACaRT" width="520">
+</p>
 
 **ITA Cadastral Ellipsoidal Reference Tessellation** — an equal-area parallelogram
 Discrete Global Grid System (DGGS) for terrestrial cadastral mapping, tessellated
 directly on the WGS84 ellipsoid.
 
+[![CI](https://github.com/itacart/itacart/actions/workflows/ci.yml/badge.svg)](https://github.com/itacart/itacart/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/itacart/itacart/branch/main/graph/badge.svg)](https://codecov.io/gh/itacart/itacart)
 [![PyPI](https://img.shields.io/pypi/v/itacart)](https://pypi.org/project/itacart/)
-[![DOI](https://img.shields.io/badge/DOI-10.14393%2Frbcv77n0a--79281-blue)](https://doi.org/10.14393/rbcv77n0a-79281)
+[![Python](https://img.shields.io/pypi/pyversions/itacart)](https://pypi.org/project/itacart/)
 [![License: BSD 3-Clause](https://img.shields.io/badge/License-BSD_3--Clause-green.svg)](LICENSE)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![DOI](https://img.shields.io/badge/DOI-10.14393%2Frbcv77n0a--79281-blue)](https://doi.org/10.14393/rbcv77n0a-79281)
 
 > **Status:** alpha. The public API is defined and documented; implementations are
 > landing module by module.
@@ -57,7 +64,7 @@ ring = itacart.cell_to_boundary(cell, close=True)
 
 # Hierarchy
 parent = itacart.get_parent(cell)
-children = list(itacart.get_children(parent))   # 25 at odd resolutions
+children = list(itacart.get_children(parent, flatten=True))   # 25 at odd resolutions
 
 # Topology
 neighbours = itacart.grid_disk(cell, k_distance=1)
@@ -88,6 +95,12 @@ itacart.count_cells(region)          # 3
 itacart.get_parent(region)           # 3 entries, positionally aligned
 itacart.grid_disk(region)            # 3 lists, one per input cell
 ```
+
+Functions that answer one value per cell collapse that alignment for a single
+cell: `get_parent` of one cell is a string, not a list of one. `get_children`
+is the exception and keeps its grouping either way, so
+`list(get_children(cell))` has length one and the children are inside it — pass
+`flatten=True` to read them directly.
 
 ## Boundary behaviour
 
@@ -155,3 +168,7 @@ conformance test suite verifies it in CI.
 ## License
 
 BSD 3-Clause. See [LICENSE](LICENSE).
+
+---
+
+Release history in [CHANGELOG.md](CHANGELOG.md). How to build, test and contribute in [CONTRIBUTING.md](CONTRIBUTING.md).
