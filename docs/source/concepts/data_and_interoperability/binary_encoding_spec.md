@@ -1,10 +1,16 @@
 # TreeBlob binary encoding
 
 TreeBlob is the dense binary form of a compositional index. It stores a
-**set of cells** — a region — and nothing else. A resolution-13 *node*
-occupies exactly ten bytes; a blob holding that one node occupies twenty,
-because the frame is paid once whatever it wraps. Section 7 separates the
-two.
+**set of cells** — a region — and nothing else.
+
+It is compact because it stores that region as a **tree** rather than as a
+list, which is what a discrete global grid makes possible: cells sharing a
+prefix share its bytes, and a prefix is written once however many leaves
+hang from it. A contiguous cover costs around **8.4 bits per cell** —
+against the fifty-five characters one resolution-13 index takes as text —
+and the floor of seven bits per leaf is a property of the format, not of a
+lucky region. Section 7 is that curve, and the cost of the frame that
+carries it.
 
 The format exists so that a region can be identified by its bytes: two
 inputs describing the same leaf set produce byte-identical blobs, and a
@@ -206,9 +212,9 @@ smaller object and carries the same address.
 Unlike the seven-bit floor, which follows from the format, the twenty
 bytes is a reading of this implementation and no test pins it.
 
-### Is ten bytes a node expensive?
+### The node against its information content
 
-It is close to the floor rather than far from it. A resolution-13 address
+Ten bytes is close to the floor rather than far from it. A resolution-13 address
 carries about **62.8 bits** of information: two of quadrant, twenty-one of
 the resolution-1 pair, twelve across the six even levels and twenty-eight
 across the six odd ones. Eighty bits is **1.27 times** that, and the
