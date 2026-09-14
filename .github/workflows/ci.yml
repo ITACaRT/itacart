@@ -73,10 +73,26 @@ jobs:
         run: >-
           pytest --doctest-modules src tests --cov=itacart --cov-branch
           --cov-fail-under=100 --cov-report=xml --cov-report=term-missing
+      #
+      # The token is required even though the repository is public: v4 of
+      # the action dropped tokenless uploading, keeping it only for pull
+      # requests opened from a fork against an upstream public repository.
+      # Without it the upload fails and says so in the log alone. The
+      # secret belongs to the canonical repository, because that is the
+      # one the badge reads; where it is absent the expression is empty
+      # and the step behaves as it did before, which is to say it fails
+      # quietly and changes nothing.
+      #
+      # fail_ci_if_error is left at its default. The coverage standard is
+      # enforced by --cov-fail-under above, which runs in this job and
+      # cannot be satisfied by an upload; making the matrix depend on a
+      # third party's availability would turn an outage into a red build
+      # that says nothing about the package.
       - name: upload coverage
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         uses: codecov/codecov-action@v4
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
 
   conformance:
