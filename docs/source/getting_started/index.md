@@ -9,5 +9,6 @@ introduction
 highlights
 installation
 quick_start
+essentials
 examples/index
 ```
