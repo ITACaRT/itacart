@@ -3,7 +3,7 @@
 ## Environment
 
 ```bash
-git clone https://github.com/ICartCWB/itacart
+git clone https://github.com/itacart/itacart
 cd itacart
 pip install -e ".[dev,docs,geo]"
 ```
@@ -109,15 +109,16 @@ page appears with captions derived from the filenames.
 
 - Docstrings, identifiers and comments in English.
 - Type hints required on every public signature.
-- Coverage target >= 85% per module.
+- Full statement and branch coverage, enforced in CI.
 - A fixed bug earns a permanent regression test.
 - An architectural decision is recorded with its rationale **and the
   alternatives that were rejected**. Recording the rejection is what keeps a
   later change from relitigating a question that was already settled.
 
-## Suggested order of implementation
+## Module dependency order
 
-The dependency graph between modules sets the order:
+The dependency graph between modules is the order in which they were built,
+and the order in which a change has to be reasoned about:
 
 1. `constants`, `exceptions` — no dependencies
 2. `geodesy` — projection and Vincenty

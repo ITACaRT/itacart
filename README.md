@@ -15,8 +15,8 @@ directly on the WGS84 ellipsoid.
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![DOI](https://img.shields.io/badge/DOI-10.14393%2Frbcv77n0a--79281-blue)](https://doi.org/10.14393/rbcv77n0a-79281)
 
-> **Status:** alpha. The public API is defined and documented; implementations are
-> landing module by module.
+> **Status:** stable. The public surface is implemented and documented, with full
+> statement and branch coverage enforced in CI.
 
 ## What makes it different
 

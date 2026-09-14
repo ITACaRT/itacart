@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "itacart"
-version = "0.1.0a4"
+version = "1.0.0rc1"
 authors = [
   { name = "ITACaRT", email = "itacart@proton.me" },
 ]
@@ -18,7 +18,7 @@ license = "BSD-3-Clause"
 license-files = ["LICENSE"]
 keywords = ["dggs", "gis", "geospatial", "cadastre", "blockchain", "sdi"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: GIS",
     "Programming Language :: Python :: 3",
@@ -49,6 +49,7 @@ dev = [
     "isort>=5.13",
     "flake8>=7.0",
     "mypy>=1.9",
+    "pre-commit>=3.5",
     "geopandas>=0.14",
 ]
 notebooks = [
@@ -64,10 +65,10 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ICartCWB/itacart"
+Homepage = "https://github.com/itacart/itacart"
 Documentation = "https://itacart.github.io/itacart/"
-Repository = "https://github.com/ICartCWB/itacart"
-Issues = "https://github.com/ICartCWB/itacart/issues"
+Repository = "https://github.com/itacart/itacart"
+Issues = "https://github.com/itacart/itacart/issues"
 Paper = "https://doi.org/10.14393/rbcv77n0a-79281"
 
 [tool.setuptools.packages.find]
