@@ -1,25 +1,14 @@
 # TreeBlob binary encoding
 
 TreeBlob is the dense binary form of a compositional index. It stores a
-**set of cells** — a region — and nothing else, built from the shared
-structure of their compositional indices.
+**set of cells** — a region — and nothing else. A resolution-13 *node*
+occupies exactly ten bytes; a blob holding that one node occupies twenty,
+because the frame is paid once whatever it wraps. Section 7 separates the
+two.
 
-Its purpose is not to minimize the size of an isolated cell. TreeBlob
-becomes efficient when many leaves share part of the same hierarchy:
-common paths are represented once, while the encoding still preserves
-missing branches and gaps between occupied leaves. A fragmented or
-sparse region can therefore be stored as one hierarchical object
-rather than as a list of independent full cell indices.
-
-Two inputs describing the same leaf set produce byte-identical
-TreeBlobs, so a content hash over those bytes provides a stable
-identifier for the region.
-
-At the level of the binary format, an isolated resolution-13 leaf
-requires ten bytes. That figure is a property of the single-leaf
-case, not the measure TreeBlob is designed to optimize. Its relevant
-storage behaviour is the size of the **whole encoded set**, where
-shared hierarchy amortizes the cost across many leaves.
+The format exists so that a region can be identified by its bytes: two
+inputs describing the same leaf set produce byte-identical blobs, and a
+content hash over those bytes is therefore a stable key.
 
 ## 1. What the blob holds, and what it does not
 
@@ -172,7 +161,10 @@ Eight properties hold, and each is pinned by a named test in
 4. **Recomposition is idempotent.**
 5. **Round trip is bit-exact**: re-encoding a decoded blob reproduces it.
 6. **Content addressing.** Any two spellings of one leaf set agree.
-7. **Prefix truncation is monotone**: truncating twice equals truncating
+7. **A resolution-13 node is ten bytes.** The property is about
+   {func}`~itacart.serialization.tree_blob.encode_node`, the standalone node, and
+   not about a blob wrapping it.
+8. **Prefix truncation is monotone**: truncating twice equals truncating
    once to the coarser of the two levels.
 
 ## 7. Density
@@ -192,6 +184,37 @@ its own path from the root.
 Any figure below seven bits per leaf is unreachable and describes
 something other than this format.
 
+### What the frame costs
+
+Those figures are the cost of the **body**. A blob also carries a fixed
+frame: three header bytes — magic, version and flags, group count — and,
+per quadrant group, two bits of quadrant plus a sixteen-bit resolution-1
+child count. The frame is paid once, whatever it wraps.
+
+For a single leaf the frame dominates. Measured against this
+implementation, a blob holding one resolution-13 leaf is **twenty bytes**,
+of which ten are the node; at resolution 1 it is nine bytes around a
+four-byte node. The crossover is quick — twenty-five complete siblings
+cost 11.2 bits per leaf, and a contiguous fill of forty-five thousand
+cells 8.39, which is the complete-refinement figure above reached from a
+real cover.
+
+So a blob is the wrong container for one cell and the right one from a
+handful upwards. Where a single cell has to travel alone, the node is the
+smaller object and carries the same address.
+
+Unlike the seven-bit floor, which follows from the format, the twenty
+bytes is a reading of this implementation and no test pins it.
+
+### Is ten bytes a node expensive?
+
+It is close to the floor rather than far from it. A resolution-13 address
+carries about **62.8 bits** of information: two of quadrant, twenty-one of
+the resolution-1 pair, twelve across the six even levels and twenty-eight
+across the six odd ones. Eighty bits is **1.27 times** that, and the
+difference is byte alignment plus the count field every node writes. The
+index string, at fifty-five characters, is seven times it.
+
 ## 8. Relationship to GeometryBlob
 
 {func}`itacart.geometry_to_tree` derives a TreeBlob from a GeometryBlob.
@@ -200,24 +223,7 @@ the vertex **set** alone, so distinct vertex orders, ring topologies,
 edge models and geometry types over the same vertices all yield the same
 TreeBlob. Coverage survives; identity does not.
 
-## 9. Compact where the structure repeats
-
-TreeBlob is not designed to make a single leaf as small as possible. Its
-advantage appears when many leaves share part of the same hierarchy.
-
-Instead of storing every cell as an independent index, TreeBlob stores
-the common tree structure once and records which branches continue,
-which terminate, and where gaps remain. This makes it especially useful
-for representing sets of cells that are clustered, fragmented, or sparse
-across the grid.
-
-A single resolution-13 leaf may require ten bytes in the encoded tree,
-but that number is not representative of TreeBlob's purpose. The relevant
- measure is the size of the encoded set, because neighbouring and related
-leaves reuse the same hierarchical structure rather than paying the full
-cost independently.
-
-## 10. Provenance
+## 9. Provenance
 
 The encoding is a port of the reference implementation in
 `itacart_core/binary_index.py`. Three of its behaviours were corrected
