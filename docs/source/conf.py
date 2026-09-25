@@ -41,7 +41,9 @@ if _loaded_from != (ROOT / "src" / "itacart").resolve():
 # --------------------------------------------------------------------------
 
 project = "ITACaRT"
-copyright = "2025-2026, Instituto Tecnologico de Aeronautica"
+copyright = (
+    "2025-2026, Instituto Tecnológico de Aeronáutica and Instituto de Estudos Avançados"
+)
 author = "Israel Nunes da Silva"
 release = itacart.__version__
 version = release
