@@ -3,7 +3,7 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [SemVer](https://semver.org/).
 
-## [1.0.0]
+## [1.0.0] - 2026-10-22
 
 The first functional release. Where `0.1.0a4` defined the public surface in
 stubs, this release implements it, holds every published figure to a named
