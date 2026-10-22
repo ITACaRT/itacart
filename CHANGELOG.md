@@ -77,6 +77,10 @@ Documentation
   the region it names.
 - Cell validity now rejects a ring that is not simple in effective geometry,
   not only one that is malformed as a spelling.
+- A polygon or multipolygon that is not a valid geometry is refused before
+  anything reads it, with the reason the geometry engine gives, and is never
+  repaired: a zero-width buffer or `make_valid` would decide which area was
+  meant.
 
 ### Fixed
 
@@ -84,6 +88,9 @@ Documentation
   longer assumes a cell keeps its own stem plus one to the east, which had
   made the hierarchy of absorbing cells disagree with the geometry.
 - The geodesic walk across the pole no longer loses the polar row.
+- `count_internal_cells` counts the last column, the polar row and the caps
+  in full. It walked them with the fill's ceiling as its budget and returned
+  the running total at the moment of passing it as though it were the count.
 - `build-system` required `setuptools>=61`, incompatible with the SPDX form
   of `license` (PEP 639). Raised to `>=77`.
 - `LICENSE` was missing, breaking `license-files` in `pyproject.toml`.
