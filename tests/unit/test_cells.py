@@ -18,7 +18,6 @@ a property.
 from __future__ import annotations
 
 import math
-import time
 
 import pytest
 
@@ -478,30 +477,49 @@ def test_ascent_visits_each_level_exactly_once(
     # the count above. Resolving whether a deep cell exists walks the same
     # ladder the ascent walks, so the public function pays for two passes
     # where the ascent itself pays for one. Linear in the depth either
-    # way, which is the claim the cost test next door makes.
+    # way, which is the claim these counts make.
     calls.clear()
     cells.cell_to_anchor(cell)
     assert calls == list(range(2, 14)) * 2
 
 
-def test_cost_grows_linearly_not_quadratically() -> None:
-    """The complexity claim, as a ratio rather than an absolute time.
+def test_the_count_catches_a_descent_redone_from_the_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The control for the descent count: the quadratic case fails it.
 
-    Doubling the depth roughly doubles the work under a single traversal
-    and roughly quadruples it under the origin's recursion. The bound is
-    deliberately loose: this runs on the CI matrix, where the machine
-    varies, and hand-written timing numbers do not survive it.
+    Redoing the descent from the root at every level returns the same
+    cell and asks for every earlier ratio again on the way down, which is
+    how the origin's recursion grew with the square of the depth. Counting
+    sees it in the calls. A clock cannot be relied on to: the fixed cost
+    of each call dilutes the growth, and a ratio bound loose enough to
+    survive the CI matrix admits the quadratic case.
     """
+    calls: list[int] = []
+    original_ratio = cells.linear_refinement_ratio
+    original_descent = cells._descend_parallelogram
 
-    def elapsed(resolution: int, repeats: int = 300) -> float:
-        start = time.perf_counter()
-        for _ in range(repeats):
-            cells.geo_to_cell(13.0, 42.0, resolution)
-        return time.perf_counter() - start
+    def counting(resolution: int) -> int:
+        calls.append(resolution)
+        return original_ratio(resolution)
 
-    shallow = elapsed(6)
-    deep = elapsed(12)
-    assert deep < 6.0 * shallow
+    def redone_from_the_root(
+        residual_x: float,
+        residual_y: float,
+        side: float,
+        first: int,
+        resolution: int,
+    ) -> list[str]:
+        codes: list[str] = []
+        for level in range(first, resolution + 1):
+            codes = original_descent(residual_x, residual_y, side, first, level)
+        return codes
+
+    expected = cells.geo_to_cell(13.0, 42.0, 13)
+    monkeypatch.setattr(cells, "linear_refinement_ratio", counting)
+    monkeypatch.setattr(cells, "_descend_parallelogram", redone_from_the_root)
+    assert cells.geo_to_cell(13.0, 42.0, 13) == expected
+    assert len(calls) == sum(level - 1 for level in range(2, 14))
 
 
 # ==========================================================================
