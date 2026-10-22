@@ -8,12 +8,18 @@ Discrete Global Grid System (DGGS) for terrestrial cadastral mapping, tessellate
 directly on the WGS84 ellipsoid.
 
 [![CI](https://github.com/itacart/itacart/actions/workflows/ci.yml/badge.svg)](https://github.com/itacart/itacart/actions/workflows/ci.yml)
+[![Docs](https://github.com/itacart/itacart/actions/workflows/docs.yml/badge.svg)](https://itacart.github.io/itacart/)
 [![codecov](https://codecov.io/gh/itacart/itacart/branch/main/graph/badge.svg)](https://codecov.io/gh/itacart/itacart)
 [![PyPI](https://img.shields.io/pypi/v/itacart)](https://pypi.org/project/itacart/)
 [![Python](https://img.shields.io/pypi/pyversions/itacart)](https://pypi.org/project/itacart/)
 [![License: BSD 3-Clause](https://img.shields.io/badge/License-BSD_3--Clause-green.svg)](LICENSE)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![DOI](https://img.shields.io/badge/DOI-10.14393%2Frbcv77n0a--79281-blue)](https://doi.org/10.14393/rbcv77n0a-79281)
+
+**Documentation: <https://itacart.github.io/itacart/>** — start with the
+[Quick Start](https://itacart.github.io/itacart/getting_started/quick_start.html), then the
+[Concepts & Guides](https://itacart.github.io/itacart/concepts/index.html) and the
+[API Reference](https://itacart.github.io/itacart/api/index.html).
 
 > **Status:** stable. The public surface is implemented and documented, with full
 > statement and branch coverage enforced in CI.
@@ -75,6 +81,11 @@ parcel = Polygon([...])
 index = itacart.polyfill(parcel, resolution=13, compact=True)
 area_m2 = itacart.count_internal_cells(parcel, 13) * itacart.nominal_cell_area(13)
 ```
+
+The [Quick Start](https://itacart.github.io/itacart/getting_started/quick_start.html) walks
+through the same calls with their output, executed when the documentation is
+built, and the [Example Notebooks](https://itacart.github.io/itacart/getting_started/examples/index.html)
+work through each of them at length.
 
 ## Compositional indices
 
