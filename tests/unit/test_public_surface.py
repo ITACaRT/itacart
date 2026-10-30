@@ -34,10 +34,13 @@ CONTRACT_MODULES = (
     "geometry",
     "hierarchy",
     "index",
+    "integer_index",
     "interop",
+    "intervals",
     "metrics",
     "resolutions",
     "serialization",
+    "serialization.data_tree_blob",
     "serialization.geometry_blob",
     "serialization.tree_blob",
     "topology",
@@ -125,7 +128,7 @@ def test_the_declared_contract_of_constants_is_what_the_package_re_exports() -> 
     }
     assert set(constants.__all__) == imported
     assert set(constants.__all__) <= set(itacart.__all__)
-    assert len(itacart.__all__) == 148
+    assert len(itacart.__all__) == 171
 
 
 # --------------------------------------------------------------------------

@@ -17,11 +17,14 @@ The facade re-exports every public name, so `itacart.geo_to_cell` and
 
 ## Reading order
 
-The package is layered. Each layer below depends on the ones above it and on
-nothing beneath, so reading downward never requires a forward reference. Every
-module is paired with the conceptual page that argues what the module
-implements: the docstring states the contract, the concept page states why the
-contract is what it is.
+The package is layered. At import time, each layer below depends on the ones
+above it and on nothing beneath, so reading downward never requires a forward
+reference. At call time the line is crossed in one direction only: four modules
+above it -- `resolutions`, `index`, `hierarchy` and `cells` -- and the private
+existence guard import `boundary` inside the functions that have to consult
+the border. Every module is paired
+with the conceptual page that argues what the module implements: the docstring
+states the contract, the concept page states why the contract is what it is.
 
 ### Foundations
 
@@ -87,6 +90,19 @@ contract is what it is.
   [Boundaries & Global Continuity](../concepts/boundaries/index.md) is the
   argument behind this module.
 
+### Numbering
+
+{py:mod}`itacart.integer_index`
+: One 64-bit integer per cell, carrying the resolution, sorting in canonical
+  order and reaching the lexical parent by arithmetic. It sits below the border
+  because existence is the border's to decide.
+  See [The Integer Index](../concepts/index_and_hierarchy/integer_index.md).
+
+{py:mod}`itacart.intervals`
+: A region as sorted ranges of those integers at a chosen depth, with union,
+  intersection, difference, containment, overlap and count.
+  See [Intervals](../concepts/index_and_hierarchy/intervals.md).
+
 ### Measuring
 
 {py:mod}`itacart.metrics`
@@ -103,10 +119,11 @@ contract is what it is.
 ### Moving data
 
 {py:mod}`itacart.serialization`
-: The binary encodings of indices and geometry.
+: The binary encodings of indices, geometry and values on cells.
   See [Serialization](../concepts/data_and_interoperability/serialization.md),
-  [GeometryBlob](../concepts/data_and_interoperability/geometry_blob.md) and
-  [TreeBlob](../concepts/data_and_interoperability/tree_blob.md).
+  [GeometryBlob](../concepts/data_and_interoperability/geometry_blob.md),
+  [TreeBlob](../concepts/data_and_interoperability/tree_blob.md) and
+  [DataTreeBlob](../concepts/data_and_interoperability/data_tree_blob.md).
 
 {py:mod}`itacart.interop`
 : Export to standard geospatial formats. What an export carries and what it

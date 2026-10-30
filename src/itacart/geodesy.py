@@ -128,7 +128,15 @@ QUADRATURE_MAX_INTERVALS: Final[int] = 4096
 """Interval cap of the adaptive refinement. WGS84 converges by 8."""
 
 VINCENTY_TOL_RAD: Final[float] = 1e-12
-"""Convergence tolerance of the Vincenty iterations, in radians."""
+"""Convergence tolerance of the Vincenty iterations.
+
+The direct solution holds its arc iterate to it in radians. The inverse
+solution holds the change in its longitude iterate to this times the
+line's angular length, up to one radian: a short line's azimuth inherits
+that residue divided by its length, and an absolute 1e-12 radian left
+0.03 degree of azimuth in a line of one centimetre. Past one radian the
+threshold is this value itself, as it always was.
+"""
 
 VINCENTY_MAX_ITER: Final[int] = 200
 """Iteration cap of the Vincenty iterations.
@@ -517,6 +525,30 @@ def _vincenty_inverse(
     Returns ``(distance_m, azimuth_deg, iterations)``. The iteration count
     locates the near-antipodal frontier, where convergence slows; the public
     wrapper drops it.
+
+    The iteration stops when the change in the longitude iterate falls
+    below ``tol`` times ``min(1, sigma)``, the line's angular length up to
+    one radian, and not below ``tol`` itself. The azimuth is read off the
+    converged iterate, and a residue ``d`` in it moves the azimuth by
+    about ``d / sin(sigma)``: an absolute threshold of 1e-12 radian left
+    3.4e-2 degree in a line of one centimetre and 2.8e-4 in a line of one
+    metre, against an independent solution, while the distance stayed
+    within micrometres. Scaled by the length, a short line's azimuth lands
+    on the rounding floor of its own inputs.
+
+    Past one radian, about 6 400 km, the threshold is ``tol`` itself, as it
+    always was. The sine shrinks again towards the antipode, and a
+    threshold scaled by it there asked the slow near-antipodal iteration
+    for digits it cannot reach within its cap: it refused lines it had
+    answered, to a tenth of a millimetre. With the default tolerance a line
+    longer than a radian is solved exactly as before, near-antipodal
+    frontier included, and so is the pair the port is pinned against,
+    which keeps its five iterations and its last bit.
+
+    The threshold never goes below four units in the last place of the
+    iterate, which is the most a float can resolve there, so a line the
+    iterate cannot tell from its neighbour -- a centimetre that crosses
+    many meridians near a pole -- still stops rather than circling.
     """
 
     if lat1 == lat2 and lon1 == lon2:
@@ -575,7 +607,8 @@ def _vincenty_inverse(
                 + c * cos_sigma * (-1.0 + 2.0 * cos_2sigma_m * cos_2sigma_m)
             )
         )
-        if abs(lam - lam_prev) < tol:
+        change = abs(lam - lam_prev)
+        if change < tol * min(1.0, sigma) or change <= 4.0 * math.ulp(lam):
             break
     else:
         raise ConvergenceError(
@@ -629,7 +662,15 @@ def inverse_geodesic(
         lat1_deg: Latitude of the first point, in degrees.
         lon2_deg: Longitude of the second point, in degrees.
         lat2_deg: Latitude of the second point, in degrees.
-        tol: Convergence tolerance on the longitude iterate, in radians.
+        tol: Convergence tolerance on the longitude iterate, relative to
+            the line's angular length up to one radian: the iteration
+            stops when the iterate moves by less than
+            ``tol * min(1, sigma)`` radians, or by no more than four units
+            in its last place. Relative because a short line's azimuth
+            inherits the residue divided by its length, so an absolute
+            threshold that suits a long line leaves a short one with a
+            wrong azimuth; capped at one radian, so that a long line,
+            near-antipodal ones included, converges as it always did.
         max_iter: Iteration cap.
 
     Returns:

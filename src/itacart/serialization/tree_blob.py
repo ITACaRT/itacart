@@ -43,6 +43,14 @@ resolution-1 cell of its own. The refinement ratio of a level is not the
 number of children a node has: a trapezoidal parent yields one more than
 the ratio, at every depth, so the count field is bounded by its own
 width and not by the ratio.
+
+Row ``1000`` holds the two polar caps, ``NE(0000/1000)`` and
+``SE(0000/1000)``. The grid has them; this version of the binary codecs
+does not serialize them. That is a restriction of the codecs and not a
+property of the grid, so a row-1000 index is refused with a message that
+says so, while a row past it is refused as outside the grid, which it is.
+The GeometryBlob reads its vertices through the same parser and refuses
+the caps with the same message.
 """
 
 from __future__ import annotations
@@ -88,7 +96,16 @@ MAX_CELL_COLUMN = 2003
 MAX_PREFIX_COLUMN = 2004
 MIN_COLUMN = 0
 MIN_ROW = 0
+#: Greatest row this version of the codecs writes. It is not the last row
+#: of the grid: see :data:`POLAR_CAP_ROW`.
 MAX_ROW = 999
+#: The row of the two polar caps, one past :data:`MAX_ROW`. The grid has
+#: it and this version of the codecs does not serialize it.
+POLAR_CAP_ROW = 1000
+_POLAR_CAP_REFUSAL = (
+    "row 1000 holds the polar caps, which this version of the binary codecs "
+    "does not serialize"
+)
 
 X_BITS = 11  # 2**11 = 2048 > 2004
 Y_BITS = 10  # 2**10 = 1024 > 999
@@ -167,6 +184,22 @@ def _max_children_at(child_res: int) -> int:
 #: Quadrants holding the meridian triangle. It is one cell, not two, so
 #: it is addressed from the east and column zero is empty to the west.
 EASTERN_QUADRANTS = ("NE", "SE")
+
+
+def _row_refusal(row: int) -> "str | None":
+    """Why ``row`` cannot be written, or ``None`` when it can.
+
+    Two reasons, and they are different statements. Row 1000 is part of
+    the grid -- it holds the polar caps -- and the refusal is this
+    version's restriction. Any other row past :data:`MAX_ROW` is outside
+    the grid. The parser and both decoders ask here, so the three places
+    that read a row give the same answer.
+    """
+    if MIN_ROW <= row <= MAX_ROW:
+        return None
+    if row == POLAR_CAP_ROW:
+        return _POLAR_CAP_REFUSAL
+    return f"row {row} is outside the grid"
 
 
 def _column_is_addressable(column: int, refined: bool, quadrant: str) -> bool:
@@ -338,8 +371,9 @@ class _Parser:
         row = int(match.group(2))
         if not MIN_COLUMN <= column <= MAX_PREFIX_COLUMN:
             raise self._fail(f"column {column} is outside the grid")
-        if not MIN_ROW <= row <= MAX_ROW:
-            raise self._fail(f"row {row} is outside the grid")
+        refusal = _row_refusal(row)
+        if refusal is not None:
+            raise self._fail(refusal)
         self.pos += len(match.group(0))
         return _Node(resolution=1, component=(column, row))
 
@@ -401,17 +435,38 @@ def _sort_key(node: _Node) -> "tuple[int, ...]":
     return (_alphabet(node.resolution).index(str(node.component)),)
 
 
-def _merge(node: _Node) -> _Node:
-    """Merge duplicate siblings and order them, depth first."""
+def _merge(node: _Node, absorb: bool = False) -> _Node:
+    """Merge duplicate siblings and order them, depth first.
+
+    With ``absorb``, a sibling written whole -- with no children -- takes
+    in every other occurrence of the same component, so a cell absorbs any
+    descendant also written under it. That is the rule
+    :func:`itacart.compose`, :func:`itacart.normalize` and
+    :func:`itacart.compact_cells` already follow, and it is what the
+    tree-blob entry points ask for. Without it, merging the two
+    occurrences in ``NE(0500/0300,0500/0300(1))`` hands the whole-cell
+    occurrence the other one's children and the parent is lost: the
+    output covers a quarter of the input.
+
+    The default stays as it was because the GeometryBlob parses its
+    vertices through here, and that format's behaviour is not this
+    function's to change.
+    """
     merged: "dict[str, _Node]" = {}
     order: list[str] = []
+    whole: "set[str]" = set()
     for child in node.children:
         key = f"{child.resolution}:{child.component!r}"
         if key not in merged:
             merged[key] = _Node(child.resolution, child.component)
             order.append(key)
+        if not child.children:
+            whole.add(key)
         merged[key].children.extend(child.children)
-    node.children = [_merge(merged[key]) for key in order]
+    if absorb:
+        for key in whole:
+            merged[key].children = []
+    node.children = [_merge(merged[key], absorb) for key in order]
     node.children.sort(key=_sort_key)
     return node
 
@@ -422,6 +477,15 @@ def recompose_to_prefix_form(index: str) -> str:
     The textual counterpart of what :func:`encode_tree` does internally:
     every distinct prefix appears once, siblings are ordered, and the
     leaf set is preserved exactly. Idempotent.
+
+    One rewrite touches the leaf set, and it preserves the region. A cell
+    written whole absorbs any descendant also written under it, as
+    :func:`itacart.compose` and :func:`itacart.normalize` do, so
+    ``NE(0500/0300,0500/0300(1))`` recomposes to ``NE(0500/0300)``. The
+    absorption is lexical, like theirs: a descendant spelled under another
+    column's prefix -- the children a border cell fathers to the east --
+    is not under the cell's own spelling and stays as written, which loses
+    nothing because both leaves are kept.
 
     This is not :func:`itacart.normalize`, which collapses a complete
     sibling set into its parent. Compaction preserves coverage while
@@ -436,13 +500,15 @@ def recompose_to_prefix_form(index: str) -> str:
         The index in canonical prefix form.
 
     Raises:
-        InvalidIndexError: If the index is malformed.
+        InvalidIndexError: If the index is malformed, or if it names row
+            1000, which holds the polar caps: this version of the binary
+            codecs does not serialize them.
 
     Example:
         >>> recompose_to_prefix_form("NE(0625/0451(2,1))")
         'NE(0625/0451(1,2))'
     """
-    return _render(_merge(_parse(index)))
+    return _render(_merge(_parse(index), absorb=True))
 
 
 # ---------------------------------------------------------------------------
@@ -459,7 +525,9 @@ def encode_tree(index: str) -> bytes:
     :func:`recompose_to_prefix_form` beforehand is redundant rather than
     required. It stays public because two of the format's properties are
     stated in terms of it and because a reader verifying a hash needs to
-    name the form the bytes are in.
+    name the form the bytes are in. A cell written whole absorbs any
+    descendant also written under it, so an index naming a cell and one
+    of its descendants encodes the cell -- the region it names.
 
     Note that :func:`itacart.normalize` is *not* that form: it collapses
     a complete sibling set into its parent, which preserves the region
@@ -473,13 +541,15 @@ def encode_tree(index: str) -> bytes:
         The binary blob.
 
     Raises:
-        InvalidIndexError: If the index is malformed.
+        InvalidIndexError: If the index is malformed, or if it names row
+            1000, which holds the polar caps: this version of the binary
+            codecs does not serialize them.
 
     Example:
         >>> encode_tree("NE(0625/0451(2,1))") == encode_tree("NE(0625/0451(1,2))")
         True
     """
-    return _encode_globe(_merge(_parse(index)))
+    return _encode_globe(_merge(_parse(index), absorb=True))
 
 
 def _encode_globe(globe: _Node) -> bytes:
@@ -613,8 +683,9 @@ def _decode_node_bits(reader: _BitReader, expected_res: int, quadrant: str) -> _
     if expected_res == 1:
         column = reader.read(X_BITS)
         row = reader.read(Y_BITS)
-        if not MIN_ROW <= row <= MAX_ROW:
-            raise MalformedBlobError(f"row {row} is outside the grid")
+        refusal = _row_refusal(row)
+        if refusal is not None:
+            raise MalformedBlobError(refusal)
         node = _Node(resolution=1, component=(column, row))
     else:
         alphabet = _alphabet(expected_res)
@@ -661,7 +732,7 @@ def validate_tree(blob: bytes) -> None:
 
 
 def _single_path(index: str) -> "tuple[str, list[_Node]]":
-    globe = _merge(_parse(index))
+    globe = _merge(_parse(index), absorb=True)
     if len(globe.children) > 1:
         raise InvalidIndexError("a node blob encodes exactly one cell")
     root = globe.children[0]
@@ -685,7 +756,9 @@ def encode_node(cell: str) -> bytes:
         The node bytes, 10 for a resolution-13 cell.
 
     Raises:
-        InvalidIndexError: If the index is malformed or not atomic.
+        InvalidIndexError: If the index is malformed or not atomic, or if
+            it names row 1000, which holds the polar caps: this version of
+            the binary codecs does not serialize them.
 
     Example:
         >>> len(encode_node("NE(0625/0451)"))
@@ -739,8 +812,9 @@ def _decode_node_components(blob: bytes) -> "tuple[str, list[tuple[int, Componen
         if level == 1:
             column = reader.read(X_BITS)
             row = reader.read(Y_BITS)
-            if not MIN_ROW <= row <= MAX_ROW:
-                raise MalformedBlobError(f"row {row} is outside the grid")
+            refusal = _row_refusal(row)
+            if refusal is not None:
+                raise MalformedBlobError(refusal)
             if not _column_is_addressable(column, resolution > 1, quadrant):
                 raise MalformedBlobError(
                     f"column {column} is not addressable in {quadrant}"
@@ -951,7 +1025,10 @@ def serialize_to_blob(index: str, compact: bool = True) -> bytes:
         The binary blob.
 
     Raises:
-        InvalidIndexError: If the index is malformed.
+        InvalidIndexError: If the index is malformed, or if it names row
+            1000, which holds the polar caps: this version of the binary
+            codecs does not serialize them. They exist, so this is the one
+            refusal here of a cell the grid has.
         NonExistentCellError: If any cell of the index names no cell. A
             blob is a record of cells, so writing one for an address with
             no cell under it would put the fold into storage, where the

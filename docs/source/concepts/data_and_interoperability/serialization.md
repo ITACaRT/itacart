@@ -11,9 +11,10 @@ kernelspec:
 
 # Serialization
 
-Two binary formats, for two different questions. **TreeBlob** stores which
-cells. **GeometryBlob** stores a geometry's identity — its vertices, ring
-topology, edge model and type.
+Three binary formats, for three different questions. **TreeBlob** stores
+which cells. **GeometryBlob** stores a geometry's identity — its vertices, ring
+topology, edge model and type. **DataTreeBlob** stores values on cells, at every
+level of the tree, and is read and updated in place.
 
 ```{code-cell} python
 import itacart
@@ -68,6 +69,12 @@ serialization.count_vertices(blob)
 **When it has to be hashed.** A hash over text is a hash over a spelling. A
 hash over a canonical blob is a hash over the thing.
 
+**When the cells carry data.** A region is a set; data on cells is a value per
+cell, and often a value per level too. The
+[DataTreeBlob](data_tree_blob.md) holds both, and answers for a cell and all
+of its ancestors in one walk down the tree. It is the one format of the three
+without a canonical form, because its job is fast access rather than identity.
+
 ## Validation is explicit
 
 ```{code-cell} python
@@ -87,6 +94,7 @@ are the authority rather than this page:
 
 - [TreeBlob binary encoding](binary_encoding_spec.md)
 - [GeometryBlob binary encoding](geometry_encoding_spec.md)
+- [DataTreeBlob binary encoding](data_tree_encoding_spec.md)
 
 Read them before writing an encoder in another language, before changing a
 header field, or when a blob from elsewhere does not decode.

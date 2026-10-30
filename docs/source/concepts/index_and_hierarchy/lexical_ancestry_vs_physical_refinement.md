@@ -58,10 +58,32 @@ if the absorbing side stops being a per-cell chord.
 
 ## What this means in practice
 
-**Hierarchical queries remain correct.** `is_ancestor`, `contains`,
-`compact_cells` and `uncompact_cells` are lexical operations with lexical
-semantics. They answer questions about the index tree, and the index tree is
-exactly what they describe.
+**Hierarchical queries split along the same line, and each is right about
+its own relation.** `is_ancestor`, `contains` and `common_ancestor` are
+lexical: they answer questions about the index tree, and the index tree is
+exactly what they describe. `get_children`, `compact_cells` and
+`uncompact_cells` are physical: they answer about the cells that partition a
+parent, wherever those cells are spelled. Away from the border the two
+coincide. At an absorbing cell they do not, and the difference can be seen:
+
+```{code-cell} python
+border = "NE(2003/0000)"
+children = list(itacart.get_children(border, flatten=True))
+own = [cell for cell in children if cell.startswith("NE(2003/0000(")]
+share = sum(itacart.effective_cell_area(c) for c in own) / itacart.effective_cell_area(border)
+len(children), len(own), round(100 * share, 2)
+```
+
+Five children, and only four of them are spelled under the parent: together
+they cover 80.05 per cent of it. The fifth is spelled under `NE(2004/0000)`, a
+prefix that names no cell.
+
+```{code-cell} python
+itacart.compact_cells(itacart.compose(children)), itacart.compact_cells(itacart.compose(own))
+```
+
+Compaction folds the five into their parent and leaves the four alone,
+because folding the four would claim ground that was not in the input.
 
 **Areal reasoning across levels needs care at the border.** If you are summing
 child areas to obtain a parent area, the sum can exceed the parent's effective

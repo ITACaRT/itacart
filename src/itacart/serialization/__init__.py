@@ -1,6 +1,6 @@
 """Binary encodings of ITACaRT indices.
 
-Two formats, with different invariants:
+Three formats, with different invariants:
 
 **TreeBlob** (:mod:`itacart.serialization.tree_blob`) encodes the
 compositional tree as a *set* of cells in canonical prefix-index form. It
@@ -20,11 +20,28 @@ The two are bridged by :func:`~itacart.serialization.geometry_blob.geometry_to_t
 in one direction only: a GeometryBlob determines a TreeBlob, but the same
 TreeBlob arises from many geometries.
 
+**DataTreeBlob** (:mod:`itacart.serialization.data_tree_blob`) encodes
+*values on cells*: a tree of cells with a fixed set of variables at every
+node, aggregated from the leaves or observed at any level. It is read and
+updated in place, a cell and its ancestors in one walk, and it has no
+canonical form: it is the format for data with a value at every level,
+where the TreeBlob is the format for a region.
+
 Provenance: ``itacart_core/binary_index.py`` and ``geometry_blob.py``.
 """
 
 from __future__ import annotations
 
+from .data_tree_blob import (
+    DataVariable,
+    data_tree_schema,
+    decode_data_tree,
+    encode_data_tree,
+    read_data_cell,
+    read_data_path,
+    slice_data_tree,
+    update_data_tree,
+)
 from .geometry_blob import (
     decode_geometry,
     encode_geometry,
@@ -69,4 +86,12 @@ __all__ = [
     "geometry_hash",
     "geometry_to_tree",
     "read_geometry_type",
+    "DataVariable",
+    "encode_data_tree",
+    "decode_data_tree",
+    "read_data_path",
+    "read_data_cell",
+    "slice_data_tree",
+    "update_data_tree",
+    "data_tree_schema",
 ]

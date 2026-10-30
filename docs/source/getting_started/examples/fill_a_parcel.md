@@ -103,8 +103,20 @@ ix.count_cells(cover), ix.count_cells(compact)
 Identical ground, a fraction of the cells: the solid interior folds into coarse
 cells and the fine ones stay where the information is, along the boundary.
 
-Compaction is lexical — it manipulates the index tree and never consults
-geometry — so it cannot introduce a geometric error.
+Compaction never changes the ground: a parent replaces its children only when
+all of them are present. "All" means the children the parent actually has,
+which at the domain border include one spelled under the next column:
+
+```{code-cell} python
+border_children = list(itacart.get_children("NE(2003/0000)", flatten=True))
+len(border_children), itacart.compact_cells(ix.compose(border_children))
+```
+
+Five children fold into one parent, and the fifth is spelled under
+`NE(2004/0000)`, a prefix that names no cell — so a parcel on the border
+compacts exactly as an interior one does.
+[Compaction & Normalization](../../concepts/index_and_hierarchy/compaction_and_normalization.md)
+has the case where the fold must not happen.
 
 ## When a parcel is smaller than a cell
 

@@ -52,9 +52,30 @@ order-of-magnitude reduction in what has to be stored, hashed or transmitted.
 [Parcel Representation](../cadastral_workflows/parcel_representation.md) covers
 the trade-off in cadastral terms.
 
-The saving is safe precisely because compaction is lexical: it manipulates the
-index tree and does not consult geometry, so it cannot introduce a geometric
-error. What it can do at the domain border is inherit one —
+The saving is safe because compaction folds by the children a parent actually
+has, not by the string. Away from the border those are the codes of the next
+alphabet spelled under it, and the fold is the familiar one. A cell whose outer
+side has been carried onto the domain border also has children spelled under
+the next column's prefix, and compaction counts them:
+
+```{code-cell} python
+border = "NE(2003/0000)"
+children = list(itacart.get_children(border, flatten=True))
+own = [cell for cell in children if cell.startswith("NE(2003/0000(")]
+len(children), itacart.compact_cells(ix.compose(children)), itacart.compact_cells(ix.compose(own))
+```
+
+Five children, one of them spelled under `NE(2004/0000)`, a prefix that names
+no cell. The five fold into their parent. The four under the parent's own
+spelling cover 80.05 per cent of it, so they do not fold: that would claim the
+rest. Normalization, which rewrites spelling only, leaves both as written:
+
+```{code-cell} python
+ix.normalize(ix.compose(own)) == ix.compose(own)
+```
+
+What compaction can do at the domain border is inherit the approximation of
+the absorbing side by a chord —
 [Lexical Ancestry vs Physical Refinement](lexical_ancestry_vs_physical_refinement.md)
 is where that is stated.
 

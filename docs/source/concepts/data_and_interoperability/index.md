@@ -5,7 +5,8 @@ Getting data in and out, and the semantics that survive the trip.
 Two kinds of export live here and they answer different questions. **Standard
 formats** — GeoJSON, WKT, GeoDataFrame — hand the grid to tools that know
 nothing about it. **Binary encodings** — TreeBlob and GeometryBlob — keep a
-cell set or a geometry in a form that is compact, hashable and verifiable.
+cell set or a geometry in a form that is compact, hashable and verifiable, and
+the DataTreeBlob keeps values on cells, at every level, for reading in place.
 
 Running through both is one distinction worth reading before either: what an
 export carries, and what it does not. A rendering of a cell is not the cell,
@@ -20,6 +21,8 @@ edge_semantics
 serialization
 geometry_blob
 tree_blob
+data_tree_blob
 binary_encoding_spec
 geometry_encoding_spec
+data_tree_encoding_spec
 ```

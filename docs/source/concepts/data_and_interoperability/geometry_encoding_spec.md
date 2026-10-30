@@ -79,6 +79,12 @@ written in full:
 - 11 bits column, 10 bits row, written without offset
 - one refinement field per level: 2 bits at even resolutions, 5 at odd
 
+The row field holds 0 to 999. Row 1000 holds the two polar caps, which
+this version of the binary codecs does not serialize: a vertex in that row
+is refused with the TreeBlob's own words, because the vertex is read by the
+TreeBlob's parser. The caps are part of the grid, so this is a restriction
+of the codec and not a statement about the grid.
+
 Every later vertex writes a 4-bit `shared_levels` field first — the
 number of hierarchy levels it has in common with its predecessor — and
 then only the levels below that. A `shared_levels` of zero means no

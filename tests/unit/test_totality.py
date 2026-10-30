@@ -114,11 +114,14 @@ def _public_methods() -> Iterator[tuple[str, Callable[..., Any]]]:
 
     The exception classes are skipped. What they expose is
     ``BaseException``'s surface and not this package's, and instantiating
-    every one of them to sweep ``add_note`` would measure Python.
+    every one of them to sweep ``add_note`` would measure Python. So are the
+    record types, for the same reason: ``DataVariable`` is a named tuple,
+    whose public methods are the tuple's ``count`` and ``index``, and which
+    cannot be built without its fields.
     """
     for name in sorted(itacart.__all__):
         value = getattr(itacart, name)
-        if not isinstance(value, type) or issubclass(value, BaseException):
+        if not isinstance(value, type) or issubclass(value, (BaseException, tuple)):
             continue
         instance = value()
         for attribute in sorted(dir(instance)):
@@ -207,19 +210,19 @@ def test_the_census_reaches_the_whole_surface() -> None:
     for name in itacart.__all__:
         for tag in _classify(name):
             tally[tag] = tally.get(tag, 0) + 1
-    assert len(itacart.__all__) == 148, "surface changed; update the counts below"
+    assert len(itacart.__all__) == 171, "surface changed; update the counts below"
     assert "stub" not in tally
-    assert tally["type"] == 19
+    assert tally["type"] == 20
     assert tally["no-arguments"] == 4
     # Equality, not a floor. A floor lets the pin rot in both directions:
     # a consumer that quietly leaves the census still clears it, and so
-    # does one that arrives without anyone deciding it belongs. Fifty-nine
-    # is the count of public names; the sweep below runs over sixty, because
-    # the facade method the census reaches is not itself a name in
+    # does one that arrives without anyone deciding it belongs. Sixty-three
+    # is the count of public names; the sweep below runs over sixty-four,
+    # because the facade method the census reaches is not itself a name in
     # ``__all__``. Both are pinned, so a consumer leaving
     # either set fails here.
-    assert tally["consumer"] == 59
-    assert len(_consumers()) == 60
+    assert tally["consumer"] == 63
+    assert len(_consumers()) == 64
     assert tally["producer"] == len(PRODUCER_NAMES)
 
 

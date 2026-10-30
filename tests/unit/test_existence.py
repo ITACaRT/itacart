@@ -224,19 +224,19 @@ def test_the_census_puts_every_public_name_in_exactly_one_bucket() -> None:
     """No name escapes in silence, and the buckets partition the surface."""
     buckets = [classify(name) for name in itacart.__all__]
     assert all(buckets), "a public name fell out of the census"
-    assert len(itacart.__all__) == 148, "surface changed; update the counts below"
+    assert len(itacart.__all__) == 171, "surface changed; update the counts below"
 
     tally = {label: buckets.count(label) for label in set(buckets)}
     assert sum(tally.values()) == len(itacart.__all__)
     assert tally == {
-        "type": 19,
+        "type": 20,
         "constant": 14,
         "no-arguments": 4,
-        "other-signature": 44,
+        "other-signature": 62,
         "fourth-form": 7,
         "lexical": 19,
         "refuses-as-syntax": 3,
-        "requires-existence": 38,
+        "requires-existence": 42,
     }
 
 
@@ -445,37 +445,333 @@ def test_the_valid_corpus_reaches_every_quadrant_and_the_polar_row() -> None:
     ]
 
 
-def test_no_public_name_emits_a_spelling_the_predicate_denies() -> None:
-    """The other half of the contract, pinned rather than checked at runtime.
+POLAR_CAPS = frozenset({"NE(0000/1000)", "SE(0000/1000)"})
 
-    Nothing emits one today, and the single emission that existed came from
-    a denied spelling going in, so closing the entrance closed the exit.
-    That makes this a property to hold rather than a guard to run, and a
-    property nobody pins is a property that leaves without being noticed.
+
+class _Unbuildable(Exception):
+    """The input a name takes could not be built from the cell.
+
+    Raised by the adapters of the blob readers when the encoder refuses
+    the cell, so that the encoder's refusal is not booked against the
+    reader, which never saw the cell.
     """
-    # ``to_geodataframe`` is the one name held out, and it is held out by
-    # name rather than by a bare exception handler. It needs the optional
-    # geo extra, and that extra brings ``pyproj`` in transitively, so a
-    # sweep that walked it would quietly stop measuring anything the day
-    # someone ran the suite without the extra installed -- and would fail
-    # for a reason that has nothing to do with what it claims to check.
-    # Refusing a denied spelling is pinned for it separately, above.
-    needs_optional_extra = {"to_geodataframe"}
-    assert needs_optional_extra <= set(_bucket("requires-existence"))
 
+
+def _built(encoder: Callable[..., bytes], *arguments: Any, **options: Any) -> bytes:
+    try:
+        return encoder(*arguments, **options)
+    except ITACaRTError as exc:
+        raise _Unbuildable(str(exc)) from exc
+
+
+def _neighbour(cell: str) -> str:
+    """A cell sharing an edge with ``cell``, for the names that take a pair."""
+    return next(iter(itacart.grid_ring(cell, 1, "manhattan", flatten=True)))
+
+
+def _tree(cell: str) -> bytes:
+    return _built(itacart.encode_tree, cell)
+
+
+def _node(cell: str) -> bytes:
+    return _built(itacart.encode_node, cell)
+
+
+def _intervals(cell: str) -> list[tuple[int, int]]:
+    return itacart.cells_to_intervals(cell)
+
+
+def _geometry(cell: str) -> bytes:
+    return _built(
+        itacart.encode_geometry,
+        [[cell]],
+        "POINT",
+        resolution=itacart.get_resolution(cell),
+    )
+
+
+DATA_COUNT = itacart.DataVariable("n", "u32", op="sum", leaf_max=1)
+
+
+def _data_tree(cell: str) -> bytes:
+    return _built(itacart.encode_data_tree, {cell: {"n": 1}}, [DATA_COUNT])
+
+
+#: How a public name is handed a cell where the bare call is not how a
+#: caller holding that cell would make it. Two kinds of entry. Some bare
+#: calls refuse for a reason that is not the cell: a pair that is not a
+#: pair of neighbours, a polygon of one vertex, a resolution-1 cell asked
+#: for its position under a parent it does not have, a distance to a cell
+#: across the antimeridian. Those were six apparent refusals of cells that
+#: exist, and four were the call's shape and not the cell. The others are
+#: names whose cell arrives inside another argument: rings, components, a
+#: region, an edge, a feature collection, or the blob an encoder wrote.
+CELL_CALLS: dict[str, Callable[[str], Any]] = {
+    "cells_to_directed_edge": lambda c: itacart.cells_to_directed_edge(
+        c, _neighbour(c)
+    ),
+    "cells_to_geometry": lambda c: itacart.cells_to_geometry([c], "Point"),
+    "child_position": lambda c: [
+        itacart.child_position(child) for child in itacart.get_children(c, flatten=True)
+    ],
+    "grid_distance": lambda c: itacart.grid_distance(c, c),
+    "canonicalize_rings": lambda c: itacart.canonicalize_rings([[c]]),
+    "contains": lambda c: itacart.contains(c, c),
+    "directed_edge_to_cells": lambda c: itacart.directed_edge_to_cells(
+        itacart.cells_to_directed_edge(c, _neighbour(c))
+    ),
+    "join_components": lambda c: itacart.join_components(itacart.split_components(c)),
+    "recover_from_geojson": lambda c: itacart.recover_from_geojson(
+        itacart.cells_to_geojson(c)
+    ),
+    "encode_geometry": lambda c: itacart.encode_geometry(
+        [[c]], "POINT", resolution=itacart.get_resolution(c)
+    ),
+    "count_vertices": lambda c: itacart.count_vertices(_tree(c)),
+    "decode_tree": lambda c: itacart.decode_tree(_tree(c)),
+    "deserialize_from_blob": lambda c: itacart.deserialize_from_blob(
+        _built(itacart.serialize_to_blob, c)
+    ),
+    "iter_leaves": lambda c: list(itacart.iter_leaves(_tree(c))),
+    "validate_tree": lambda c: itacart.validate_tree(_tree(c)),
+    "decode_node": lambda c: itacart.decode_node(_node(c)),
+    "is_ancestor_binary": lambda c: itacart.is_ancestor_binary(_node(c), _node(c)),
+    "prefix_at_resolution_binary": lambda c: itacart.prefix_at_resolution_binary(
+        _node(c), 1
+    ),
+    "resolution_of_binary": lambda c: itacart.resolution_of_binary(_node(c)),
+    "decode_geometry": lambda c: itacart.decode_geometry(_geometry(c)),
+    "geometry_hash": lambda c: itacart.geometry_hash(_geometry(c)),
+    "geometry_to_tree": lambda c: itacart.geometry_to_tree(_geometry(c)),
+    "read_geometry_type": lambda c: itacart.read_geometry_type(_geometry(c)),
+    "validate_geometry": lambda c: itacart.validate_geometry(_geometry(c)),
+    "int_to_cell": lambda c: itacart.int_to_cell(itacart.cell_to_int(c)),
+    "int_to_str": lambda c: itacart.int_to_str(itacart.cell_to_int(c)),
+    "int_resolution": lambda c: itacart.int_resolution(itacart.cell_to_int(c)),
+    "int_parent": lambda c: itacart.int_parent(itacart.cell_to_int(c)),
+    "intervals_to_cells": lambda c: itacart.intervals_to_cells(_intervals(c)),
+    "intervals_union": lambda c: itacart.intervals_union(_intervals(c), []),
+    "intervals_intersection": lambda c: itacart.intervals_intersection(
+        _intervals(c), _intervals(c)
+    ),
+    "intervals_difference": lambda c: itacart.intervals_difference(_intervals(c), []),
+    "intervals_contain": lambda c: itacart.intervals_contain(
+        _intervals(c), _intervals(c)
+    ),
+    "intervals_overlap": lambda c: itacart.intervals_overlap(
+        _intervals(c), _intervals(c)
+    ),
+    "intervals_count": lambda c: itacart.intervals_count(_intervals(c)),
+    "encode_data_tree": lambda c: itacart.encode_data_tree({c: {"n": 1}}, [DATA_COUNT]),
+    "decode_data_tree": lambda c: itacart.decode_data_tree(_data_tree(c)),
+    "read_data_path": lambda c: itacart.read_data_path(_data_tree(c), c),
+    "read_data_cell": lambda c: itacart.read_data_cell(_data_tree(c), c),
+    "slice_data_tree": lambda c: itacart.slice_data_tree(_data_tree(c), c),
+    "update_data_tree": lambda c: itacart.update_data_tree(
+        bytearray(_data_tree(c)), c, {"n": 1}
+    ),
+    "data_tree_schema": lambda c: itacart.data_tree_schema(_data_tree(c)),
+}
+
+#: Names outside the index-first buckets whose arguments carry no cell:
+#: coordinates, geometries, resolutions, scales, a zone, a quadrant, a
+#: mapping of geometry or a data frame to fill. They answer *with* cells
+#: and are measured on the way out, by the emission check, not here.
+TAKES_NO_CELL = frozenset(
+    {
+        "cell_size",
+        "count_internal_cells",
+        "crosses_antemeridian",
+        "densify_orthodromic",
+        "densify_segment",
+        "direct_geodesic",
+        "extension_bounds",
+        "extension_zone_for_point",
+        "from_geodataframe",
+        "from_geojson",
+        "geo_to_cell",
+        "geodetic_to_sinusoidal",
+        "inverse_geodesic",
+        "inverse_meridian_arc",
+        "is_tokenizable_resolution",
+        "last_lattice_column",
+        "latlng_to_cell",
+        "linear_refinement_ratio",
+        "meridian_arc",
+        "meridian_arc_quadrature",
+        "meridian_radius",
+        "nominal_cell_area",
+        "polyfill",
+        "prime_vertical_radius",
+        "refinement_alphabet",
+        "refinement_ratio",
+        "resolution_for_scale",
+        "scale_for_resolution",
+        "sinusoidal_to_cell",
+        "sinusoidal_to_geodetic",
+        "vertex_to_cell",
+    }
+)
+
+#: The refusals of a cell that exists, each with the exception it raises
+#: and words its message must carry. Asserted by equality, so a name that
+#: starts refusing a cell fails here, and so does one that stops.
+#:
+#: The polar caps are refused by the binary codecs, which do not serialize
+#: them in this version, and by compactness, because a cap's ring visits
+#: the same point twice and encloses an area that is not the cap's. Every
+#: trapezoid is refused as an end of a grid distance, because the lattice
+#: step is not defined at a clipped cell.
+DECLARED_REFUSALS: dict[tuple[str, str], tuple[str, frozenset[str]]] = {
+    ("compactness", "GeometryError"): ("not a simple closed curve", POLAR_CAPS),
+    ("encode_geometry", "GeometryError"): ("does not serialize", POLAR_CAPS),
+    ("encode_node", "InvalidIndexError"): ("does not serialize", POLAR_CAPS),
+    ("encode_tree", "InvalidIndexError"): ("does not serialize", POLAR_CAPS),
+    ("grid_distance", "DomainError"): (
+        "is a trapezoid",
+        frozenset(cell for cell in VALID if itacart.cell_shape(cell) == "trapezoid"),
+    ),
+    ("recompose_to_prefix_form", "InvalidIndexError"): (
+        "does not serialize",
+        POLAR_CAPS,
+    ),
+    ("serialize_to_blob", "InvalidIndexError"): ("does not serialize", POLAR_CAPS),
+}
+
+#: Readers of a blob whose input cannot be written for these cells, because
+#: the encoder refuses them as declared above. Not refusals: the reader
+#: never receives the cell.
+BLOB_READERS = frozenset(
+    {
+        "count_vertices",
+        "decode_geometry",
+        "decode_node",
+        "decode_tree",
+        "deserialize_from_blob",
+        "geometry_hash",
+        "geometry_to_tree",
+        "is_ancestor_binary",
+        "iter_leaves",
+        "prefix_at_resolution_binary",
+        "read_geometry_type",
+        "resolution_of_binary",
+        "validate_geometry",
+        "validate_tree",
+    }
+)
+
+
+def _takes_a_cell() -> list[str]:
+    """Every public name a cell can be handed to, by bucket and by table."""
+    names = [
+        name
+        for name in _bucket("requires-existence")
+        + _bucket("lexical")
+        + _bucket("refuses-as-syntax")
+        if name != "to_geodataframe"
+    ]
+    return names + sorted(
+        name
+        for name in _bucket("fourth-form") + _bucket("other-signature")
+        if name in CELL_CALLS
+    )
+
+
+def _hand(name: str, cell: str) -> Any:
+    if name in CELL_CALLS:
+        return CELL_CALLS[name](cell)
+    return _call(name, cell)
+
+
+def _sweep_valid() -> (
+    tuple[dict[tuple[str, str], set[str]], set[tuple[str, str]], list[str], list[str]]
+):
+    """Hand every valid cell to every name that takes one.
+
+    Returns the refusals by name and exception, the pairs whose input could
+    not be built, the refusals whose message does not carry the declared
+    words, and every denied spelling a name emitted.
+    """
+    refusals: dict[tuple[str, str], set[str]] = {}
+    unbuildable: set[tuple[str, str]] = set()
+    wrong_reason: list[str] = []
     escapes: list[str] = []
-    for name in _bucket("requires-existence") + _bucket("lexical"):
-        if name in needs_optional_extra:
-            continue
+    for name in _takes_a_cell():
         for cell in VALID:
             try:
-                result = _call(name, cell)
-            except ITACaRTError:
+                result = _hand(name, cell)
+            except _Unbuildable:
+                unbuildable.add((name, cell))
+                continue
+            except ITACaRTError as exc:
+                key = (name, type(exc).__name__)
+                refusals.setdefault(key, set()).add(cell)
+                declared = DECLARED_REFUSALS.get(key)
+                if declared is not None and declared[0] not in str(exc):
+                    wrong_reason.append(f"{name}({cell!r}): {exc}")
                 continue
             for atom in ATOM.findall(str(result)):
                 if not itacart.is_valid_cell(atom):
                     escapes.append(f"{name}({cell!r}) emitted {atom}")
+    return refusals, unbuildable, wrong_reason, escapes
+
+
+def test_every_name_that_takes_a_cell_is_reached() -> None:
+    """The sweep's population is a census, not a list someone remembers.
+
+    Every name outside the index-first buckets is either handed a cell by
+    the table above or declared as taking none, and the two partition what
+    is there. The call table names no one twice and nothing that is gone.
+    """
+    outside = set(_bucket("fourth-form") + _bucket("other-signature"))
+    in_table = {name for name in CELL_CALLS if name in outside}
+    assert in_table | TAKES_NO_CELL == outside
+    assert not in_table & TAKES_NO_CELL
+    assert set(CELL_CALLS) <= set(itacart.__all__)
+    assert BLOB_READERS <= set(CELL_CALLS)
+    assert len(_takes_a_cell()) == 41 + 19 + 3 + 5 + 15 + 4 + 7 + 7
+
+
+def test_a_cell_that_exists_is_accepted_or_its_refusal_is_declared() -> None:
+    """The other half of the existence contract, measured.
+
+    A spelling the predicate denies is refused, which the sweeps above pin.
+    A cell the predicate accepts is accepted, by every name that takes one,
+    or its refusal is in the declared set with its exception and its
+    reason. No name emits a spelling the predicate denies, either, which is
+    what the emission check that lived here pinned, and it keeps pinning
+    it now that a refusal is no longer skipped in silence.
+    """
+    refusals, unbuildable, wrong_reason, escapes = _sweep_valid()
+    assert refusals == {
+        key: set(cells) for key, (_, cells) in DECLARED_REFUSALS.items()
+    }
+    assert wrong_reason == []
     assert escapes == []
+    assert unbuildable == {(name, cap) for name in BLOB_READERS for cap in POLAR_CAPS}
+    assert len(DECLARED_REFUSALS[("grid_distance", "DomainError")][1]) == 20
+
+
+def test_the_refusal_instrument_reports_an_undeclared_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The control: a name that starts refusing a valid cell is reported.
+
+    ``cell_shape`` is made to refuse one cell that exists, and the sweep
+    has to put it outside the declared set rather than skip it.
+    """
+    real = itacart.cell_shape
+    victim = "NW(0001/0300)"
+    assert victim in VALID
+
+    def refusing(cell: str) -> Any:
+        if cell == victim:
+            raise NonExistentCellError(f"{cell!r} refused for the control")
+        return real(cell)
+
+    monkeypatch.setattr(itacart, "cell_shape", refusing)
+    refusals, _, _, _ = _sweep_valid()
+    assert refusals[("cell_shape", "NonExistentCellError")] == {victim}
 
 
 def test_no_cell_is_its_own_neighbour() -> None:

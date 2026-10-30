@@ -6,11 +6,11 @@ TreeBlob is the dense binary form of a compositional index. It stores a
 It is compact because it stores that region as a **tree** rather than as a
 list, which is what a discrete global grid makes possible: cells sharing a
 prefix share its bytes, and a prefix is written once however many leaves
-hang from it. A contiguous cover costs around **8.4 bits per cell** —
-against the fifty-five characters one resolution-13 index takes as text —
-and the floor of seven bits per leaf is a property of the format, not of a
-lucky region. Section 7 is that curve, and the cost of the frame that
-carries it.
+hang from it. A contiguous cover costs around **8.4 bits per cell** when its
+cells sit at an odd resolution and about **9.1** at an even one — against
+the fifty-five characters one resolution-13 index takes as text — and the
+floor of seven bits per leaf is a property of the format, not of a lucky
+region. Section 7 is that curve, and the cost of the frame that carries it.
 
 The format exists so that a region can be identified by its bytes: two
 inputs describing the same leaf set produce byte-identical blobs, and a
@@ -31,6 +31,13 @@ bound on any fill resolution and never the value itself, so no decoder
 can recover it. Callers who need a uniform expansion hold that number
 themselves and pass it to {func}`itacart.uncompact_cells`.
 
+Nor does it hold data about the cells. A TreeBlob's identity is its leaf
+set, and that is what its bytes and its hash stand for. For data on cells
+with a value at every level -- observed at the leaves and aggregated up
+the tree, or observed at a level of its own -- the format is the
+[DataTreeBlob](data_tree_encoding_spec.md), which keeps a tree of cells
+and adds the values.
+
 ## 2. Canonical form
 
 Two spellings of one leaf set must produce one blob, so the encoder
@@ -50,6 +57,17 @@ it.
 recomposes its input before emitting bytes, so calling the rewrite first
 is redundant rather than required. Nothing is lost by doing it, and
 nothing is gained.
+
+One rewrite touches the leaf set, and it preserves the region. A cell
+written whole absorbs any descendant also written under it, as
+{func}`itacart.compose` and {func}`itacart.normalize` do:
+`NE(0500/0300,0500/0300(1))` names two cells, one inside the other, and
+encodes as `NE(0500/0300)`. Release 1.0.0 merged the two occurrences the
+other way round, kept the daughter and lost the rest of the parent — three
+quarters of it here. No other input encodes differently from 1.0.0. The absorption is lexical
+like theirs: a daughter spelled under another column's prefix, as a border
+cell's surplus child is, is not written under the cell and is kept as a
+leaf of its own, which loses nothing.
 
 It is **not** {func}`itacart.normalize`. Normalisation collapses a
 complete sibling set into its parent, which preserves the region while
@@ -122,7 +140,16 @@ offset**. Both axes are zero-based.
 | Axis | Range | Field |
 | --- | --- | --- |
 | Column | 0–2003 as cells, 2004 as a prefix | 11 bits |
-| Row | 0–999 | 10 bits |
+| Row | 0–999 written; 1000 refused | 10 bits |
+
+**Row 1000 holds the two polar caps**, `NE(0000/1000)` and
+`SE(0000/1000)`. The grid has them; this version of the binary codecs does
+not serialize them. That is a restriction of the codecs and not a property
+of the grid, and the refusal says so — *row 1000 holds the polar caps,
+which this version of the binary codecs does not serialize* — where it used
+to call the row outside the grid. From row 1001 on the row is outside the
+grid, and the refusal says that. The GeometryBlob reads its vertices
+through the same parser and refuses the caps in the same words.
 
 Two structural exceptions, both constant, neither dependent on latitude:
 
@@ -166,7 +193,8 @@ Eight properties hold, and each is pinned by a named test in
 3. `encode(x) == encode(recompose(x))`.
 4. **Recomposition is idempotent.**
 5. **Round trip is bit-exact**: re-encoding a decoded blob reproduces it.
-6. **Content addressing.** Any two spellings of one leaf set agree.
+6. **Content addressing.** Any two spellings of one leaf set agree, and a
+   spelling that writes a cell and a descendant of it agrees with the cell.
 7. **A resolution-13 node is ten bytes.** The property is about
    {func}`~itacart.serialization.tree_blob.encode_node`, the standalone node, and
    not about a blob wrapping it.
@@ -181,11 +209,22 @@ constant.
 Every leaf writes its own component and its own terminating count field,
 so the floor is **seven bits per leaf** — two bits of component plus
 five of count, at an even resolution. No tree of any shape goes below
-it. The densest trees the format admits, complete refinement with no
-gaps, measure about 8.4 bits per leaf. A contiguous fill converges from
-above towards roughly nine as the region grows. Leaves scattered across
-many resolution-1 cells cost upwards of a hundred, because each pays for
-its own path from the root.
+it.
+
+The densest trees the format admits, complete refinement with no gaps,
+cost a figure that depends on the parity of the leaves' resolution: about
+**8.4 bits per leaf at an odd resolution and 9.1 at an even one**. Ten
+thousand leaves measure 8.37 and 9.10, against asymptotes of 8.3636 and
+9.0909 that follow from the field widths. A contiguous fill approaches the
+figure of its own parity from above as the region grows: a square of about
+two kilometres, some forty-four thousand cells, costs 8.40 at resolution 7
+and 9.15 at resolution 8.
+
+Leaves scattered one to a resolution-1 cell each pay for their own path
+from the root — twenty-four bits at resolution 1, seven for each even
+level and eight for each odd one. Three hundred of them cost 54.2 bits per
+leaf at resolution 5, 84.2 at 9 and 99.1 at 11, and pass a hundred from
+resolution 12 on: 106.2 there and 114.2 at 13.
 
 Any figure below seven bits per leaf is unreachable and describes
 something other than this format.
@@ -201,25 +240,35 @@ For a single leaf the frame dominates. Measured against this
 implementation, a blob holding one resolution-13 leaf is **twenty bytes**,
 of which ten are the node; at resolution 1 it is nine bytes around a
 four-byte node. The crossover is quick — twenty-five complete siblings
-cost 11.2 bits per leaf, and a contiguous fill of forty-five thousand
-cells 8.39, which is the complete-refinement figure above reached from a
-real cover.
+cost 11.2 bits per leaf, and the forty-four-thousand-cell fill at
+resolution 7 costs 8.40, which is the odd-parity complete-refinement
+figure above reached from a real cover.
 
 So a blob is the wrong container for one cell and the right one from a
 handful upwards. Where a single cell has to travel alone, the node is the
 smaller object and carries the same address.
 
-Unlike the seven-bit floor, which follows from the format, the twenty
-bytes is a reading of this implementation and no test pins it.
+The seven-bit floor follows from the format; the twenty bytes is a reading
+of this implementation. Both, and every other figure in this section, are
+pinned by named tests in `tests/unit/test_tree_blob_density.py`.
 
 ### The node against its information content
 
-Ten bytes is close to the floor rather than far from it. A resolution-13 address
-carries about **62.8 bits** of information: two of quadrant, twenty-one of
-the resolution-1 pair, twelve across the six even levels and twenty-eight
-across the six odd ones. Eighty bits is **1.27 times** that, and the
-difference is byte alignment plus the count field every node writes. The
-index string, at fifty-five characters, is seven times it.
+Ten bytes is close to the floor rather than far from it. The fields of a
+resolution-13 address can name about **62.8 bits** worth of positions: two
+of quadrant, twenty-one of the resolution-1 pair, twelve across the six
+even levels and twenty-eight across the six odd ones. That is a box, and
+it holds positions that are not cells; the cells that exist — 5 100 221 at
+resolution 1, a hundred times more for every two levels below — carry
+about **62.1 bits**.
+
+The node writes **73 bits** of fields — eight of marker and resolution, two
+of quadrant, twenty-one of pair, twelve across the even levels and thirty
+across the odd ones — and seven of padding to the byte. There is no count
+field in a node. Eighty bits is **1.27 times** the 62.8, and the difference
+is the marker byte, the padding, and about 2.2 bits of fixed-width fields
+over alphabets whose sizes are not powers of two. The index string, at
+fifty-five characters, is seven times it.
 
 ## 8. Relationship to GeometryBlob
 
@@ -232,7 +281,7 @@ TreeBlob. Coverage survives; identity does not.
 ## 9. Provenance
 
 The encoding is a port of the reference implementation in
-`itacart_core/binary_index.py`. Three of its behaviours were corrected
+`itacart_core/binary_index.py`. Four of its behaviours were corrected
 rather than carried over, because the reference models a partial grid —
 parallelograms only, without the meridian triangle or the trapezoidal
 cell's surplus child, a limitation its own exception module states.

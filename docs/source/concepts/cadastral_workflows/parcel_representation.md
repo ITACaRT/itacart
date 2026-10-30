@@ -59,9 +59,19 @@ itacart.count_cells(cover), itacart.count_cells(compact)
 Identical ground, far fewer cells. The interior folds into coarse cells and the
 fine ones stay along the boundary, which is where the information actually is.
 
-Compaction is lexical, so it cannot introduce a geometric error —
-[Compaction & Normalization](../index_and_hierarchy/compaction_and_normalization.md).
-Use it before storing, hashing or transmitting. Note that an area computed from
+Compaction replaces children by their parent only when every child the parent
+has is present, so the ground does not change. "Every child" is counted
+physically: at the domain border a parent has a child spelled under the next
+column's prefix, and a fold that read only the string would miss it.
+
+```{code-cell} python
+border_children = list(itacart.get_children("NE(2003/0000)", flatten=True))
+len(border_children), itacart.compact_cells(itacart.compose(border_children))
+```
+
+Five children, one of them spelled under `NE(2004/0000)`, fold into the one
+parent — [Compaction & Normalization](../index_and_hierarchy/compaction_and_normalization.md).
+Use compaction before storing, hashing or transmitting. Note that an area computed from
 a compacted cover must weight each cell by its own resolution, because the
 cells are no longer all the same size.
 

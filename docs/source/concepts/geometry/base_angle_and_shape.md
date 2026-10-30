@@ -17,6 +17,7 @@ angle is what that forty-five degrees becomes once the cell is carried to the
 curved surface, and it is measured rather than predicted.
 
 ```{code-cell} python
+import itacart
 from itacart import metrics
 [(f"NE({x:04d}/0000)", round(metrics.cell_base_angle(f"NE({x:04d}/0000)"), 6))
  for x in (1, 500, 1000, 2000)]
@@ -45,8 +46,29 @@ where it is the entire difference between 89.426479 and 89.710055.
 
 The other arm is the **geodesic** from the anchor to the corner the shear
 displaces. That corner is identifiable in a parallelogram, a triangle and a
-trapezoid alike, so the metric is defined for every cell rather than for the
-interior only.
+trapezoid alike, in the cell's own frame. Which way a cell leans is read from
+the side of the prime meridian its anchor lies on, and not from its quadrant
+code: the western half of a meridian triangle, and of a polar cap, is spelled
+under an eastern code and leans the western way.
+
+```{code-cell} python
+[(c, itacart.cell_shape(c), round(metrics.cell_base_angle(c), 6))
+ for c in ("NE(0000/0900(2))", "NE(0000/0900(3))", "NE(0000/0900(1))")]
+```
+
+The two halves of a meridian triangle's children are mirror images and lean by
+the same angle; the triangle among them answers zero, because its leaning
+corner is the far end of its own base. So the metric is defined for every
+cell, at every resolution down to the centimetre, and it is zero on a triangle
+and nowhere else:
+
+```{code-cell} python
+sao_paulo = [itacart.geo_to_cell(-46.6328862, -23.5508962, resolution=r) for r in (9, 11, 13)]
+[round(metrics.cell_base_angle(c), 6) for c in sao_paulo]
+```
+
+Below a centimetre-scale cell the last decimals are the rounding of
+coordinates written in degrees, not the cell.
 
 ## It is a function of lattice position
 

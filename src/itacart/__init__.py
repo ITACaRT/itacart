@@ -25,7 +25,7 @@ aligned with :func:`itacart.index.decompose` order.
 
 from __future__ import annotations
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __paper_doi__ = "10.14393/rbcv77n0a-79281"
 
 # -- Constants --------------------------------------------------------------
@@ -138,6 +138,14 @@ from .index import (
     quadrant_of,
     split_components,
 )
+from .integer_index import (
+    cell_to_int,
+    int_parent,
+    int_resolution,
+    int_to_cell,
+    int_to_str,
+    str_to_int,
+)
 from .interop import (
     cell_to_wkt,
     cells_to_geojson,
@@ -147,7 +155,22 @@ from .interop import (
     recover_from_geojson,
     to_geodataframe,
 )
-from .metrics import cell_base_angle, compactness, normalized_cell_area
+from .intervals import (
+    cells_to_intervals,
+    intervals_contain,
+    intervals_count,
+    intervals_difference,
+    intervals_intersection,
+    intervals_overlap,
+    intervals_to_cells,
+    intervals_union,
+)
+from .metrics import (
+    cell_base_angle,
+    cell_max_uncertainty,
+    compactness,
+    normalized_cell_area,
+)
 from .resolutions import (
     cell_size,
     effective_cell_area,
@@ -161,11 +184,15 @@ from .resolutions import (
     scale_for_resolution,
 )
 from .serialization import (
+    DataVariable,
     count_vertices,
+    data_tree_schema,
+    decode_data_tree,
     decode_geometry,
     decode_node,
     decode_tree,
     deserialize_from_blob,
+    encode_data_tree,
     encode_geometry,
     encode_node,
     encode_tree,
@@ -174,10 +201,14 @@ from .serialization import (
     is_ancestor_binary,
     iter_leaves,
     prefix_at_resolution_binary,
+    read_data_cell,
+    read_data_path,
     read_geometry_type,
     recompose_to_prefix_form,
     resolution_of_binary,
     serialize_to_blob,
+    slice_data_tree,
+    update_data_tree,
     validate_geometry,
     validate_tree,
 )
@@ -341,6 +372,22 @@ __all__ = [
     "join_components",
     "quadrant_of",
     "base_cell_of",
+    # integer index
+    "cell_to_int",
+    "int_to_cell",
+    "int_resolution",
+    "int_parent",
+    "str_to_int",
+    "int_to_str",
+    # intervals
+    "cells_to_intervals",
+    "intervals_to_cells",
+    "intervals_union",
+    "intervals_intersection",
+    "intervals_difference",
+    "intervals_contain",
+    "intervals_overlap",
+    "intervals_count",
     # resolutions
     "get_resolution",
     "refinement_ratio",
@@ -355,6 +402,7 @@ __all__ = [
     "compactness",
     "cell_base_angle",
     "normalized_cell_area",
+    "cell_max_uncertainty",
     # hierarchy
     "get_parent",
     "get_children",
@@ -408,6 +456,15 @@ __all__ = [
     "geometry_hash",
     "geometry_to_tree",
     "read_geometry_type",
+    # data tree
+    "DataVariable",
+    "encode_data_tree",
+    "decode_data_tree",
+    "read_data_path",
+    "read_data_cell",
+    "slice_data_tree",
+    "update_data_tree",
+    "data_tree_schema",
     # interop
     "cells_to_geojson",
     "cell_to_wkt",

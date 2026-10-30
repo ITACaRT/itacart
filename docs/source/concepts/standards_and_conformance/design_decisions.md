@@ -84,6 +84,12 @@ Emitting full precision costs bytes and never lies. Given that the grid's
 finest resolution is one centimetre and its cadastral purpose is measurement,
 the bytes are the cheaper of the two.
 
+What a coordinate cannot carry, the index can. Section 3.1.10 of RFC 7946 says
+the number of digits of a coordinate does not indicate its uncertainty; here
+the resolution of the cell does, and {func}`itacart.cell_max_uncertainty`
+says how much, on the ground: the distance from the cell's centroid, where a
+position written as the cell is read back, to the cell's farthest vertex.
+
 ## Areal invalidity is refused, not repaired
 
 The thread running through all of the above. Where the package meets something

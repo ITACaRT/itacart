@@ -10,10 +10,11 @@ from coordinates.
 
 That density is deliberate — a discrete global grid is characterised by its
 indexing method more than by anything else — but it means the notation has to
-be read carefully. These pages read it, in order, and end with the two
+be read carefully. These pages read it, in order, through the two
 distinctions that catch people: what ancestry in the string does and does not
 claim about geometry, and the difference between an index that is legal and a
-cell that exists.
+cell that exists. They end with the two numeric forms of the same names: one
+integer per cell, and a region as ranges of integers.
 
 ```{toctree}
 :maxdepth: 1
@@ -24,4 +25,6 @@ parent_children_and_descendants
 lexical_ancestry_vs_physical_refinement
 compaction_and_normalization
 cell_validity_and_existence
+integer_index
+intervals
 ```

@@ -157,10 +157,72 @@ def test_the_codec_does_not_re_derive_the_boundary() -> None:
     assert itacart.last_lattice_column("NE", 451, itacart.cell_size(1)) == 1519
 
 
-def test_the_row_past_the_last_one_is_refused() -> None:
-    """Rows run 0 to 999, so 1000 is outside the grid."""
-    with pytest.raises(InvalidIndexError, match="row 1000"):
-        tree_blob.encode_tree("NE(0625/1000)")
+def test_the_polar_caps_are_refused_as_a_restriction_of_the_codecs() -> None:
+    """Row 1000 is in the grid, and this version does not serialize it.
+
+    The two caps exist, so a message calling their row outside the grid
+    would state a property of the grid that is false. Both codecs refuse
+    them, and both say why in the same words, because the GeometryBlob
+    reads its vertices through the tree parser. The cells used are the
+    real caps: a column of row 1000 that names no cell would be refused
+    either way and could not tell the two messages apart.
+    """
+    from itacart.exceptions import GeometryError
+
+    message = (
+        "row 1000 holds the polar caps, which this version of the binary "
+        "codecs does not serialize"
+    )
+    for cap in ("NE(0000/1000)", "SE(0000/1000)"):
+        assert itacart.is_valid_cell(cap) is True
+        for encoder in (
+            tree_blob.encode_tree,
+            tree_blob.encode_node,
+            tree_blob.recompose_to_prefix_form,
+            itacart.serialize_to_blob,
+        ):
+            with pytest.raises(InvalidIndexError, match=message):
+                encoder(cap)
+        with pytest.raises(GeometryError, match=message):
+            itacart.encode_geometry([[cap]], "POINT", resolution=1)
+
+
+def test_a_row_past_the_caps_is_outside_the_grid() -> None:
+    """From row 1001 on the old message stays, because it is true there."""
+    for row in (1001, 9999):
+        with pytest.raises(InvalidIndexError, match=f"row {row} is outside the grid"):
+            tree_blob.encode_tree(f"NE(0000/{row:04d})")
+
+
+def _with_field(blob: bytes, offset: int, width: int, value: int) -> bytes:
+    """``blob`` with the ``width``-bit field at bit ``offset`` set to ``value``."""
+    bits = "".join(f"{byte:08b}" for byte in blob)
+    bits = bits[:offset] + f"{value:0{width}b}" + bits[offset + width :]
+    return bytes(int(bits[i : i + 8], 2) for i in range(0, len(bits), 8))
+
+
+def test_a_decoded_cap_row_is_refused_with_the_same_reason() -> None:
+    """The decoders share the reason with the parser, row for row.
+
+    A blob is never written with row 1000, so these are blobs made to lie.
+    The row field sits after the three header bytes, the two quadrant
+    bits, the sixteen-bit group count and the eleven-bit column in a tree
+    blob, and after the resolution byte, the quadrant and the column in a
+    node blob. Row 1023, the largest the field holds, is the control: it
+    keeps the message that says it is outside the grid.
+    """
+    tree = tree_blob.encode_tree("NE(0625/0000)")
+    node = tree_blob.encode_node("NE(0625/0000)")
+    tree_row, node_row = 24 + 2 + 16 + 11, 8 + 2 + 11
+    assert tree_blob.validate_tree(_with_field(tree, tree_row, 10, 999)) is None
+    assert tree_blob.decode_node(_with_field(node, node_row, 10, 999)) == (
+        "NE(0625/0999)"
+    )
+    for row, reason in ((1000, "row 1000 holds the polar caps"), (1023, "outside")):
+        with pytest.raises(MalformedBlobError, match=reason):
+            tree_blob.validate_tree(_with_field(tree, tree_row, 10, row))
+        with pytest.raises(MalformedBlobError, match=reason):
+            tree_blob.decode_node(_with_field(node, node_row, 10, row))
 
 
 # --------------------------------------------------------------------------
@@ -245,6 +307,73 @@ def test_recompose_orders_siblings_without_compacting_them() -> None:
     complete = "NE(0625/0451(2,1,4,3))"
     assert tree_blob.recompose_to_prefix_form(complete) == "NE(0625/0451(1,2,3,4))"
     assert itacart.normalize(complete) == "NE(0625/0451)"
+
+
+def test_a_cell_written_whole_absorbs_its_descendants_on_every_port() -> None:
+    """The codec keeps the region a nested spelling names.
+
+    ``NE(0500/0300,0500/0300(1))`` is a valid index of two cells, one
+    inside the other. Merging the two occurrences of the parent used to
+    hand the whole one the other's children, so every port stored the
+    daughter and lost the parent: a quarter of the region. The index layer
+    absorbs the daughter instead, and the codec now does the same, so the
+    four ports agree with the plain parent byte for byte, written in
+    either order and nested more than one level deep.
+    """
+    parent = "NE(0500/0300)"
+    nested = (
+        "NE(0500/0300,0500/0300(1))",
+        "NE(0500/0300(1),0500/0300)",
+        "NE(0500/0300(1(A1)),0500/0300)",
+        "NE(0500/0300,0500/0300(1(A1),2))",
+    )
+    for index in nested:
+        assert itacart.count_cells(index) > 1
+        assert itacart.compose(itacart.decompose(index)) == parent
+        assert tree_blob.encode_tree(index) == tree_blob.encode_tree(parent)
+        assert tree_blob.recompose_to_prefix_form(index) == parent
+        assert tree_blob.serialize_to_blob(index, compact=False) == (
+            tree_blob.encode_tree(parent)
+        )
+        assert tree_blob.encode_node(index) == tree_blob.encode_node(parent)
+
+    # One level down, the whole occurrence is the daughter, and it absorbs
+    # the granddaughter while its sibling stays.
+    deeper = "NE(0500/0300(1,1(A1),2(B2)))"
+    assert tree_blob.recompose_to_prefix_form(deeper) == "NE(0500/0300(1,2(B2)))"
+    assert itacart.compose(itacart.decompose(deeper)) == "NE(0500/0300(1,2(B2)))"
+
+
+def test_absorption_is_lexical_like_the_index_layer() -> None:
+    """A daughter spelled under another column's prefix is not absorbed.
+
+    ``NE(2004/0000(3))`` lies inside ``NE(2003/0000)`` and is spelled under
+    the prefix of the next column, so neither the index layer nor the
+    codec sees it as written under the parent. Both keep the two leaves,
+    which loses nothing: the parent already covers the daughter.
+    """
+    border = "NE(2003/0000,2004/0000(3))"
+    assert itacart.normalize(border) == border
+    assert itacart.compact_cells(border) == border
+    assert tree_blob.recompose_to_prefix_form(border) == border
+    assert tree_blob.decode_tree(tree_blob.encode_tree(border)) == border
+
+
+def test_the_vertex_parser_keeps_its_merge() -> None:
+    """The GeometryBlob is not this repair's to change.
+
+    It parses vertices through the tree parser's merge, and that merge
+    keeps its old rule when it is not asked to absorb. A two-cell nested
+    spelling handed in as one vertex still reads as the daughter, as it
+    did in 1.0.0; asking for absorption reads it as the parent.
+    """
+    from itacart.serialization.tree_blob import _merge, _parse, _render
+
+    nested = "NE(0500/0300,0500/0300(1))"
+    blob = itacart.encode_geometry([[nested]], "POINT", resolution=2)
+    assert itacart.decode_geometry(blob)["rings"] == [["NE(0500/0300(1))"]]
+    assert _render(_merge(_parse(nested))) == "NE(0500/0300(1))"
+    assert _render(_merge(_parse(nested), absorb=True)) == "NE(0500/0300)"
 
 
 def test_compacting_changes_the_blob_on_purpose() -> None:

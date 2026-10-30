@@ -354,7 +354,7 @@ def test_the_reference_is_the_parallel_and_not_a_geodesic_chord() -> None:
         predicted = abs(span / 2.0 * math.sin(math.radians(anchor[1])))
         assert round(half_convergence, 6) == round(predicted, 6) == expected
 
-    biased = 89.426478522 + 0.283576381
+    biased = 89.426478519 + 0.283576381
     assert round(biased, 6) == 89.710055
     assert round(itacart.cell_base_angle("NE(0100/0900)"), 6) == 89.426479
 
@@ -367,9 +367,13 @@ def test_the_angle_agrees_across_the_four_quadrants() -> None:
     because mirroring reverses the ring and lands on the other of the
     two corners that carry 45 degrees on the plane.
     """
+    # Pinned against an independent geodesic solution over the same two
+    # points, not against this function's own output: the first two pins
+    # once carried three units in the ninth decimal of the solver's
+    # convergence residue, and agreed with themselves all the same.
     for column, row, expected in (
-        (500, 0, 45.017729482),
-        (100, 900, 89.426478522),
+        (500, 0, 45.017729479),
+        (100, 900, 89.426478519),
         (100, 950, 134.375798680),
     ):
         cell = f"({column:04d}/{row:04d})"
@@ -644,3 +648,109 @@ def test_the_three_return_a_scalar_for_an_atomic_index() -> None:
         itacart.normalized_cell_area,
     ):
         assert isinstance(function("NE(0500/0000)"), float)
+
+
+# --------------------------------------------------------------------------
+# The uncertainty of a position written as a cell
+# --------------------------------------------------------------------------
+
+#: One cell of each family the uncertainty is read in: interior, the square
+#: of row 900, a meridian triangle, a border trapezoid, the polar row, the
+#: cap, an extension cell in Chukotka and a resolution-13 cell.
+UNCERTAINTY_CELLS = (
+    "NE(0500/0000)",
+    "NE(0100/0900)",
+    "NE(0000/0300)",
+    "NE(2003/0000)",
+    "SW(0001/0999)",
+    "SE(0000/1000)",
+    "NE(0931/0709)",
+    "SW(0476/0260(4(A2(2(E3(4(B4(3(E2(1(C3(2(D4)))))))))))))",
+)
+
+
+def test_the_uncertainty_answers_in_metres_and_in_sides() -> None:
+    """Radius and diameter in metres, the ratio as the radius over the side."""
+    cell = "NE(0100/0900)"
+    radius = itacart.cell_max_uncertainty(cell)
+    assert radius == itacart.cell_max_uncertainty(cell, "radius")
+    diameter = itacart.cell_max_uncertainty(cell, "diameter")
+    ratio = itacart.cell_max_uncertainty(cell, "ratio")
+    assert isinstance(radius, float) and isinstance(diameter, float)
+    assert isinstance(ratio, float)
+    assert ratio == radius / SIDE_1
+    assert (round(radius, 3), round(diameter, 3)) == (7097.751, 14178.2)
+
+
+def test_the_uncertainty_follows_decompose_over_several_roots() -> None:
+    index = "NE(0500/0000,0100/0900),SE(0000/1000),NW(0003/0004(2))"
+    parts = itacart.decompose(index)
+    assert len(parts) == 4
+    for output in ("radius", "diameter", "ratio"):
+        many = itacart.cell_max_uncertainty(index, output)  # type: ignore[arg-type]
+        assert isinstance(many, list)
+        assert many == [
+            itacart.cell_max_uncertainty(part, output)  # type: ignore[arg-type]
+            for part in parts
+        ]
+
+
+def test_the_uncertainty_refuses_an_unknown_output_and_a_missing_cell() -> None:
+    refusal = "must be 'radius', 'diameter' or 'ratio'"
+    uncertainty = itacart.cell_max_uncertainty
+    with pytest.raises(GeometryError, match=refusal):
+        uncertainty("NE(0500/0000)", "diagonal")  # type: ignore[arg-type]
+    for missing in ("NW(0000/1000)", "NE(0625/1000)", "NE(0500/0000),NW(0000/0110)"):
+        with pytest.raises(NonExistentCellError):
+            itacart.cell_max_uncertainty(missing)
+
+
+def test_the_uncertainty_is_the_same_twice_and_in_a_fresh_process() -> None:
+    """No state decides it: a second call, and a second interpreter.
+
+    The second interpreter imports this same package and answers the cells
+    in reverse order, so that a cache warmed in one order cannot hide a
+    dependence on it.
+    """
+    import json
+    import os
+    import subprocess
+    import sys
+
+    index = itacart.compose(list(UNCERTAINTY_CELLS))
+    assert sorted(itacart.decompose(index)) == sorted(UNCERTAINTY_CELLS)
+    here = {
+        output: [
+            itacart.cell_max_uncertainty(cell, output) for cell in UNCERTAINTY_CELLS
+        ]
+        for output in ("radius", "diameter", "ratio")
+    }
+    again = {
+        output: [
+            itacart.cell_max_uncertainty(cell, output) for cell in UNCERTAINTY_CELLS
+        ]
+        for output in ("radius", "diameter", "ratio")
+    }
+    assert again == here
+    source = os.path.dirname(os.path.dirname(itacart.__file__))
+    script = (
+        "import json, sys\n"
+        "import itacart\n"
+        "cells = json.load(sys.stdin)\n"
+        "answers = {output: [itacart.cell_max_uncertainty(cell, output)\n"
+        "                    for cell in reversed(cells)][::-1]\n"
+        "           for output in ('radius', 'diameter', 'ratio')}\n"
+        "json.dump({'file': itacart.__file__, 'answers': answers}, sys.stdout)\n"
+    )
+    path = os.pathsep.join(filter(None, (source, os.environ.get("PYTHONPATH"))))
+    run = subprocess.run(
+        [sys.executable, "-c", script],
+        input=json.dumps(list(UNCERTAINTY_CELLS)),
+        capture_output=True,
+        text=True,
+        check=True,
+        env=dict(os.environ, PYTHONPATH=path),
+    )
+    there = json.loads(run.stdout)
+    assert there["file"] == itacart.__file__
+    assert there["answers"] == here

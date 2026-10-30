@@ -11,7 +11,13 @@
 # before first use so that they reflect what is published today.
 
 default_language_version:
-  python: python3.11
+  python: python3.12
+
+# Hooks run when committing unless they say otherwise. Without this line every
+# hook also runs on `git push` once the pre-push hook type is installed, which
+# the test hook below needs, and the formatters then run against whatever the
+# working tree holds at push time, generated files included.
+default_stages: [pre-commit]
 
 repos:
   # -- Basic file hygiene ---------------------------------------------------

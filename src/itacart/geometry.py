@@ -2181,20 +2181,27 @@ def cells_to_geometry(
 
     which is 1.118 l on the prime meridian, 0.707 l at its minimum where
     ``u = 1``, and 1.65 l as ``u`` reaches pi. That is the reach to first
-    order in the side. A finite cell departs from it where the side is not
-    small against the distance to the pole: over the ordinary cells of a
-    lattice of the four quadrants at five resolutions from 10 km to 1 cm,
-    the measured reach stays within 0.3 per cent of the law below 85
-    degrees of latitude, and exceeds it by up to 2.1 per cent above.
+    order in the side, and :func:`itacart.metrics.cell_max_uncertainty`
+    returns the reach of any cell. A finite cell departs from the law in
+    proportion to its side, and most near the pole: over the population
+    that function documents, which runs through the last rows before the
+    polar row and past ``u = pi`` in Chukotka, the reach of a regular
+    parallelogram exceeds the law by at most ``4.2e-3 * l / 10 km`` below
+    85 degrees of latitude and ``0.2 * l / 10 km`` from 85 degrees to row
+    998, plus up to ``1e-6`` from the rounding of the coordinates.
 
     Three families are not bounded by that law, and are named rather than
-    folded into it. A prime-meridian triangle reaches ``sqrt(10) / 3 * l``,
-    within 0.3 per cent below 85 degrees and 1.4 per cent above. A cell
-    that absorbs the domain border, a polar-row cell and a cap cell reach
-    further: up to 2.06 l over the last existing column of every resolution-1
-    row in the four quadrants, together with the border, polar-row and cap
-    cells of the lattice above and both caps at every resolution. That is a
-    measurement over the population named, not a bound beyond it.
+    folded into it. A prime-meridian triangle reaches ``sqrt(10) / 3 * l``
+    to first order, and a finite one falls short of it: by at most
+    ``2.7e-3 * l / 10 km`` below 85 degrees and ``0.13 * l / 10 km`` from
+    85 degrees to row 998, over the triangles of rows 930 to 998 and down
+    the prime meridian to resolution 13. A cell that absorbs the domain
+    border, a polar-row cell and a cap cell reach further: up to 2.06 l
+    over the last existing column of every resolution-1 row in the four
+    quadrants, together with the border, polar-row and cap cells of a
+    lattice of the four quadrants at five resolutions from 10 km to 1 cm and
+    both caps at every resolution. That is a measurement over the population
+    named, not a bound beyond it.
 
     **Precision.** Coordinates are returned at full double precision and
     never rounded. How precisely a rebuilt vertex is known is declared by
