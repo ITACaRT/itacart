@@ -45,16 +45,17 @@ and fiscal weight.
 pip install itacart
 ```
 
-Optional extras:
+Optional extra:
 
 ```bash
 pip install "itacart[geo]"       # GeoDataFrame export
-pip install "itacart[parallel]"  # parallel cell filling
 ```
 
-`shapely` is the only hard runtime dependency. The ellipsoidal sinusoidal
-projection is computed directly from the paper's equations, so PROJ is never
-called at runtime.
+The runtime dependencies are `shapely` and `numpy`, which Shapely requires as
+well. The ellipsoidal sinusoidal projection is computed directly from the
+paper's equations, so PROJ is never called at runtime. Workers need no extra:
+`count_internal_cells` spreads a large count over processes from the standard
+library.
 
 ## Quick start
 

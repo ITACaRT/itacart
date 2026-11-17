@@ -93,6 +93,23 @@ defect and not a defect of ``contains``.
 Representing the border exactly would mean carrying a side, a resolution-1
 row and an interval instead of a ring. That was investigated and is not in
 this version.
+
+**The cell that holds a pole at resolution 10 is not refined.** That cell,
+``NE(0000/1000(1(B2(4(E5(4(B2(4(A1(4))))))))))`` at the north pole and its
+twin under ``SE`` at the south, exists, and its children cannot be
+enumerated: the cells found leave part of its ring uncovered, so they do
+not partition it. :func:`get_children`, :func:`get_descendants` and
+:func:`uncompact_cells` raise :class:`~itacart.exceptions.GeometryError`
+for it as their result is iterated, and the names that refine through
+them do the same: :func:`itacart.intervals.cells_to_intervals` asked for a
+resolution finer than 10 there, and :func:`itacart.geometry.polyfill`,
+:func:`itacart.geometry.count_internal_cells`,
+:func:`itacart.interop.from_geojson` and
+:func:`itacart.interop.from_geodataframe` for a geometry that reaches the
+cell, from resolution 11. Inside the cell, at resolutions 11 and 12, a
+position can be answered with a spelling that names no cell, as
+:mod:`itacart.cells` states. Both are known limitations of this version,
+and named tests pin them so that they fail when either is fixed.
 """
 
 from __future__ import annotations
@@ -616,6 +633,11 @@ def get_children(
             The predicate is the arbiter and the contract ends there:
             a spelling it denies is refused rather than answered for
             the cell it would otherwise fold onto.
+        GeometryError: For the cell that holds a pole at resolution 10,
+            whose children cannot be enumerated: the cells found leave
+            part of its ring uncovered. A known limitation; see the
+            module's notes. Raised as the result is iterated, not when
+            the function is called.
     """
     if target_res is not None and target_res > MAX_RESOLUTION:
         raise MaxResolutionError(
@@ -674,6 +696,10 @@ def get_descendants(index: str, target_res: int) -> Iterator[str]:
         MaxResolutionError: If ``target_res`` exceeds resolution 13.
         NonExistentCellError: If any addressed cell names no cell.
         ResolutionError: If ``target_res`` is not finer than any input cell.
+        GeometryError: If the descent reaches the cell that holds a pole at
+            resolution 10, whose children cannot be enumerated. A known
+            limitation; see the module's notes. Raised as the stream is
+            iterated.
     """
     # Descent answers about a cell, so it is on the entering side of the
     # existence contract. The check is here rather than left to the
@@ -984,6 +1010,10 @@ def uncompact_cells(index: str, target_res: int) -> Iterator[str]:
         MaxResolutionError: If ``target_res`` exceeds resolution 13.
         NonExistentCellError: If any cell of the index names no cell.
         ResolutionError: If any terminal cell is finer than ``target_res``.
+        GeometryError: If the expansion reaches the cell that holds a pole
+            at resolution 10, whose children cannot be enumerated. A known
+            limitation; see the module's notes. Raised as the result is
+            iterated.
     """
     if target_res > MAX_RESOLUTION:
         raise MaxResolutionError(

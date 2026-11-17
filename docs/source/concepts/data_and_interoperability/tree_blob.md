@@ -65,12 +65,22 @@ That is [Absorbing Boundary Cells](../boundaries/absorbing_boundary_cells.md)
 reaching into the wire format, and the specification gives it a section of its
 own.
 
-## One quadrant per blob
+## One group per quadrant
 
-A TreeBlob holds one quadrant. A geometry whose vertices span more than one
-needs more than one blob — which is a consequence of the quadrant being the
-root of the index, and of the grid not wrapping:
-[Antimeridian](../boundaries/antimeridian.md).
+The quadrant is the root of the index, and a TreeBlob holds one group for each
+quadrant the index names, up to all four. A cell set spread over three
+quadrants goes into one blob and comes back whole:
+
+```{code-cell} python
+spread = "NE(0001/0001),NW(0003/0004),SE(0002/0002)"
+serialization.deserialize_from_blob(serialization.serialize_to_blob(spread)) == spread
+```
+
+That is the form `compose` writes for any cell set across the equator or the
+prime meridian, and the form `polyfill` writes for any region over the
+equator. The groups are ordered by quadrant, so a cell set has one spelling in
+bytes however it was written; the header field that counts them is in
+[TreeBlob binary encoding](binary_encoding_spec.md).
 
 ## Validation
 

@@ -47,10 +47,11 @@ three.
 from __future__ import annotations
 
 import math
+import multiprocessing
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from functools import lru_cache
-from typing import TYPE_CHECKING, Callable, Final, Literal, Sequence, TypeVar
+from typing import TYPE_CHECKING, Any, Final, Literal, Sequence
 
 from .boundary import _CLIP_EPSILON_M, crosses_antemeridian, last_lattice_column
 from .cells import _ROW_LETTERS, cell_to_centroid, geo_to_cell
@@ -74,6 +75,7 @@ from .geodesy import direct_geodesic, geodetic_to_sinusoidal, inverse_geodesic
 from .resolutions import cell_size, linear_refinement_ratio, refinement_ratio
 
 if TYPE_CHECKING:
+    from numpy.typing import NDArray
     from shapely.geometry import LineString, Point, Polygon
     from shapely.geometry.base import BaseGeometry
     from shapely.prepared import PreparedGeometry
@@ -1647,10 +1649,6 @@ def _prepare(
     return plane, out
 
 
-_T = TypeVar("_T")
-_R = TypeVar("_R")
-
-
 class _LatticeView:
     """A per-thread prepared copy of one quadrant's lattice geometry.
 
@@ -1659,8 +1657,9 @@ class _LatticeView:
     predicate call and mutates the underlying GEOS object while doing so,
     so two threads entering it together corrupt that structure and the
     interpreter dies with a segmentation fault rather than an exception.
-    Found by ``test_threads_and_serial_agree``, which is why that test
-    compares the two paths instead of only exercising one.
+    Found by ``test_the_worker_count_never_changes_the_answer`` while
+    :func:`polyfill` still ran on threads and that test compared four of
+    them with one.
 
     Each thread therefore rebuilds the geometry from its WKB and prepares
     its own. Nothing is shared but the bytes, which are immutable, and
@@ -1683,21 +1682,6 @@ class _LatticeView:
             cached = prep(_wkb.loads(self._wkb))
             self._local.prepared = cached
         return cached
-
-
-def _map_jobs(work: Sequence[_T], call: Callable[[_T], _R], n_jobs: int) -> list[_R]:
-    """Run ``call`` over ``work``, on a thread pool when asked for one.
-
-    Threads rather than processes: the geometry predicates are Shapely's,
-    which release the interpreter lock, and the work items are small
-    enough that pickling a polygon to a child would dominate. Thread
-    safety comes from :class:`_LatticeView` giving each worker its own
-    prepared copy, not from sharing one.
-    """
-    if n_jobs == 1:
-        return [call(item) for item in work]
-    with ThreadPoolExecutor(max_workers=n_jobs) as pool:
-        return list(pool.map(call, work))
 
 
 def polyfill(
@@ -1756,6 +1740,16 @@ def polyfill(
     belongs to the geometry as written, not to where it lies. Geometries
     without area are not asked.
 
+    **Workers.** The fill runs in the calling thread, whatever ``n_jobs``
+    says. Release 1.1.0 spread it over threads, and two of them made it
+    slower than one -- 3.9 times, for a one-degree box at resolution 5,
+    measured on a two-core Linux machine with Python 3.12, Shapely 2.2
+    and GEOS 3.14 -- for the reason :func:`count_internal_cells` gives:
+    every scalar Shapely call handed the interpreter lock to the other
+    thread. The parameter stays, validated as before, so that calls
+    which pass it keep working. A batched descent of its own, which could
+    use processes as the count does, is future work.
+
     Args:
         geometry: A Shapely geometry in EPSG:4326.
         resolution: Target resolution level, 1 to 13.
@@ -1768,7 +1762,8 @@ def polyfill(
             family -- where the geometry meets the strip the last lattice
             column of a row absorbs, or a polar cap -- because the fold
             reads a uniform tree and that family has none.
-        n_jobs: Worker count; above 1 spreads base cells over threads.
+        n_jobs: Accepted for compatibility and validated, an int of at
+            least 1; the fill is serial for every value (see **Workers**).
 
     Returns:
         A compositional index string covering the geometry.
@@ -1783,7 +1778,10 @@ def polyfill(
             ``compact=True`` meets the border-absorbing family, or if it
             keeps no cell: the geometry is empty, it has no area under ``center``
             or ``contains``, or it is narrower than one cell under the
-            chosen mode. The message names which.
+            chosen mode. The message names which. And from resolution 11,
+            if the geometry reaches the cell that holds a pole at
+            resolution 10, whose children cannot be enumerated: a known
+            limitation, stated in :mod:`itacart.hierarchy`.
     """
     _check_resolution(resolution)
     _check_jobs(n_jobs)
@@ -1834,7 +1832,7 @@ def polyfill(
         # order the index is read in. compose() preserves the order it is
         # given rather than imposing one, so the ordering has to be here.
         cells = sorted(_base_cells(view.prepared, view.geometry, quadrant, resolution))
-        parts = [f for f in _map_jobs(cells, _one, n_jobs) if f is not None]
+        parts = [f for f in map(_one, cells) if f is not None]
         if parts:
             ordered.setdefault(quadrant, []).extend(parts)
 
@@ -1917,6 +1915,369 @@ def _covers_no_cell(geometry: "BaseGeometry", containment: str) -> str:
     return f"geometry covers no cell at this resolution: {cause}"
 
 
+# --------------------------------------------------------------------------
+# Batched count
+# --------------------------------------------------------------------------
+
+_COUNT_BATCH: Final[int] = 50_000
+"""Nodes asked about in one Shapely call by the batched count.
+
+The batch bounds memory, not the result: the count is a sum of integers,
+so where the batches split changes nothing. At this size a serial count
+at resolution 13 over a rectangle of 21 600 km2 with 650 km of outline
+peaked at 114 MB for the whole process, 56 MB above where it started,
+and took three minutes, on one Linux machine with Python 3.12. Memory
+follows the cells the outline crosses, so that figure is the
+rectangle's, not a bound for every region of its size.
+"""
+
+_PARALLEL_MIN_NODES: Final[int] = 2_000_000
+"""Estimated node tests below which :func:`count_internal_cells` stays in one process.
+
+Starting workers costs a fixed amount -- each worker is a fresh
+interpreter, started by ``spawn``, that imports numpy, Shapely and this
+package before it counts anything -- and a count that finishes in a
+second or two does not repay it. :func:`_estimated_nodes` gives the
+estimate. Measured under ``spawn`` on a two-core Linux machine, over
+fifteen counts of three regions at resolutions 5 to 13 with the pool
+forced open, two workers were slower than one up to an estimate of
+0.9 million nodes, about even at 1.6 million and faster from 1.8
+million, so the threshold stands just past the point where they win.
+"""
+
+_FRONTIER_PER_JOB: Final[int] = 256
+"""Frontier nodes per worker before the frontier is dealt out.
+
+Dealt out earlier, a handful of nodes of very different cost decides the
+balance; interleaved chunks of a few hundred nodes each even it out.
+"""
+
+_CHUNKS_PER_JOB: Final[int] = 4
+"""Interleaved chunks per worker, so that a slow chunk does not idle the rest."""
+
+
+def _split_level(
+    geometry: "BaseGeometry",
+    u0: "NDArray[Any]",
+    v0: "NDArray[Any]",
+    side: float,
+    level: int,
+    target: int,
+) -> tuple[int, "NDArray[Any]", "NDArray[Any]", float]:
+    """Answer one level above the target for many nodes at once.
+
+    The three outcomes of :func:`_count_node`, asked of an array of
+    squares with one Shapely call per question instead of one call per
+    square: a square the geometry does not meet is dropped, a square it
+    contains adds its whole subtree in closed form, and a square on the
+    outline yields its children for the next level.
+
+    Returns the closed-form total and the children as ``(u0, v0, side)``.
+    The children are built with the arithmetic of :func:`_count_node` --
+    ``child = side / divisor`` and ``u0 + column * child`` -- one IEEE-754
+    operation at a time and in the same order, so every square asked
+    about here is, bit for bit, the square the recursive descent asks
+    about. The squares themselves come from ``shapely.box``, which writes
+    the same ring as :func:`shapely.geometry.box`.
+
+    ``geometry`` must already be prepared (``shapely.prepare``): the
+    array predicates use the prepared form when there is one, which is
+    what :class:`shapely.prepared.PreparedGeometry` delegates to as well.
+    """
+    import numpy as np
+    import shapely
+
+    squares = shapely.box(u0, v0, u0 + side, v0 + side)
+    meets = shapely.intersects(geometry, squares)
+    u0, v0, squares = u0[meets], v0[meets], squares[meets]
+    inside = shapely.contains(geometry, squares)
+    total = int(np.count_nonzero(inside)) * _leaves_between(level, target)
+    crossing = ~inside
+    u0, v0 = u0[crossing], v0[crossing]
+    divisor = linear_refinement_ratio(level + 1)
+    child = side / divisor
+    offsets = np.arange(divisor) * child
+    n = len(u0)
+    # Rows outer, columns inner, as _count_node loops; the order does not
+    # change the sum, but it keeps the two descents easy to compare.
+    child_u0 = np.broadcast_to(
+        u0[:, None, None] + offsets[None, None, :], (n, divisor, divisor)
+    ).ravel()
+    child_v0 = np.broadcast_to(
+        v0[:, None, None] + offsets[None, :, None], (n, divisor, divisor)
+    ).ravel()
+    return total, child_u0, child_v0, child
+
+
+def _count_leaves(
+    geometry: "BaseGeometry",
+    u0: "NDArray[Any]",
+    v0: "NDArray[Any]",
+    side: float,
+    strict: bool,
+) -> int:
+    """Answer the target level for many leaves at once, under ``containment="center"``.
+
+    A leaf counts when its centre lies inside the geometry.
+    :func:`_count_node` reaches that question in three steps -- the
+    geometry meets the square, contains the square, contains the centre
+    -- and :func:`_accept_leaf` records why the first two cannot change
+    the answer: wholly inside implies centre inside implies touching. So,
+    unless ``strict``, the centre is asked directly, with
+    ``shapely.contains_xy``: the point form of ``contains``, asked of
+    coordinates without building a Point. The centre is
+    ``u0 + side / 2.0``, the expression :func:`_accept_leaf` evaluates.
+
+    The chain is a theorem for a valid geometry only. :func:`_refuse_invalid_area`
+    asks for validity of the geometry the caller wrote, not of the lattice
+    piece that densification, projection, the quadrant cut and the shear
+    made of it, so :func:`_count_ordinary` asks again and passes the
+    answer as ``not strict``. On an invalid piece nothing guarantees the
+    chain -- a spike or a slit of zero width can put a leaf's centre on
+    the outline -- although no case was found where GEOS 3.14 breaks it
+    (spikes, degenerate holes, bow-ties and overlapping parts through a
+    leaf's centre all agree). Rather than rely on that, the three steps
+    are taken there as :func:`_count_node` takes them, the last with
+    ``contains`` on a Point, as :func:`_accept_leaf` asks it, and the two
+    versions agree by construction whatever GEOS answers.
+    """
+    import numpy as np
+    import shapely
+
+    if not strict:
+        inside = shapely.contains_xy(geometry, u0 + side / 2.0, v0 + side / 2.0)
+        return int(np.count_nonzero(inside))
+    squares = shapely.box(u0, v0, u0 + side, v0 + side)
+    meets = shapely.intersects(geometry, squares)
+    u0, v0, squares = u0[meets], v0[meets], squares[meets]
+    inside = shapely.contains(geometry, squares)
+    crossing = ~inside
+    centres = shapely.points(u0[crossing] + side / 2.0, v0[crossing] + side / 2.0)
+    kept = shapely.contains(geometry, centres)
+    return int(np.count_nonzero(inside)) + int(np.count_nonzero(kept))
+
+
+def _count_nodes_batched(
+    geometry: "BaseGeometry",
+    u0: "NDArray[Any]",
+    v0: "NDArray[Any]",
+    side: float,
+    level: int,
+    target: int,
+    strict: bool,
+) -> int:
+    """Count the target cells under many nodes of one level, a level at a time.
+
+    Equal to the sum of :func:`_count_node` over the nodes, with
+    ``containment="center"`` (:func:`_split_level`, :func:`_count_leaves`).
+    The nodes are taken :data:`_COUNT_BATCH` at a time, each batch
+    descended before the next is read, so memory holds one batch per
+    level at most and the recursion is as deep as the resolution
+    difference, never deeper.
+    """
+    total = 0
+    for start in range(0, len(u0), _COUNT_BATCH):
+        stop = start + _COUNT_BATCH
+        batch_u0, batch_v0 = u0[start:stop], v0[start:stop]
+        if level == target:
+            total += _count_leaves(geometry, batch_u0, batch_v0, side, strict)
+            continue
+        inside, child_u0, child_v0, child = _split_level(
+            geometry, batch_u0, batch_v0, side, level, target
+        )
+        total += inside
+        if len(child_u0):
+            total += _count_nodes_batched(
+                geometry, child_u0, child_v0, child, level + 1, target, strict
+            )
+    return total
+
+
+def _estimated_nodes(frontier: int, level: int, target: int) -> int:
+    """Rough number of node tests left under ``frontier`` nodes waiting at ``level``.
+
+    A count is bound by its outline, so the nodes left grow with the side
+    ratio down to the target, the square root of :func:`_leaves_between`,
+    and not with the area ratio. The factor 3 covers the levels in
+    between. Only the choice between one process and several reads it;
+    the count does not.
+    """
+    return frontier * math.isqrt(_leaves_between(level, target)) * 3
+
+
+def _expand_frontier(
+    geometry: "BaseGeometry",
+    u0: "NDArray[Any]",
+    v0: "NDArray[Any]",
+    side: float,
+    level: int,
+    target: int,
+    want: int,
+) -> tuple[int, "NDArray[Any]", "NDArray[Any]", float, int]:
+    """Answer whole levels in this process until ``want`` nodes wait at the next one.
+
+    Returns the closed-form total gathered on the way and the frontier --
+    the nodes of the returned level, not yet asked about. Stops early at
+    the target, or when the outline has no node left to descend.
+    """
+    total = 0
+    while level < target and 0 < len(u0) < want:
+        inside, u0, v0, side = _split_level(geometry, u0, v0, side, level, target)
+        total += inside
+        level += 1
+    return total, u0, v0, side, level
+
+
+def _count_chunk_in_process(
+    work: tuple[bytes, "NDArray[Any]", "NDArray[Any]", float, int, int, bool],
+) -> int:
+    """Worker entry of :func:`_count_ordinary`: one interleaved chunk of the frontier.
+
+    Module level so that it pickles by name. The worker rebuilds and
+    prepares its own geometry from the WKB, as :class:`_LatticeView` does
+    per thread; validity was decided once, in the parent, on the same
+    bytes.
+    """
+    import shapely
+
+    lattice_wkb, u0, v0, side, level, target, strict = work
+    geometry = shapely.from_wkb(lattice_wkb)
+    shapely.prepare(geometry)
+    return _count_nodes_batched(geometry, u0, v0, side, level, target, strict)
+
+
+def _count_ordinary(
+    lattice: "BaseGeometry",
+    bases: list[tuple[int, int]],
+    target: int,
+    n_jobs: int,
+) -> int:
+    """Count the ordinary base cells of one quadrant piece, batched.
+
+    The base squares are placed with the expressions the recursive count
+    passes to :func:`_count_node` -- ``(column + row) * _L1`` and
+    ``row * _L1`` -- evaluated as Python floats before they enter the
+    arrays. Validity of the lattice piece is asked here, once, and decides
+    how leaves are answered (:func:`_count_leaves`).
+
+    With ``n_jobs`` above 1 the descent runs here until its frontier holds
+    :data:`_FRONTIER_PER_JOB` nodes per worker; if what is left is worth
+    the workers (:data:`_PARALLEL_MIN_NODES`), the frontier is dealt out
+    in interleaved chunks to a process pool, and otherwise it is finished
+    here. Either way the same nodes are asked the same questions.
+    """
+    import numpy as np
+    import shapely
+
+    if not bases:
+        return 0
+    lattice_wkb = lattice.wkb
+    geometry = shapely.from_wkb(lattice_wkb)
+    shapely.prepare(geometry)
+    strict = not geometry.is_valid
+    u0 = np.array([(column + row) * _L1 for column, row in bases], dtype=float)
+    v0 = np.array([row * _L1 for _, row in bases], dtype=float)
+    if n_jobs == 1:
+        return _count_nodes_batched(geometry, u0, v0, _L1, 1, target, strict)
+    total, u0, v0, side, level = _expand_frontier(
+        geometry, u0, v0, _L1, 1, target, _FRONTIER_PER_JOB * n_jobs
+    )
+    if (
+        level == target
+        or _estimated_nodes(len(u0), level, target) < _PARALLEL_MIN_NODES
+    ):
+        return total + _count_nodes_batched(
+            geometry, u0, v0, side, level, target, strict
+        )
+    chunks = min(_CHUNKS_PER_JOB * n_jobs, len(u0))
+    work = [
+        (lattice_wkb, u0[k::chunks], v0[k::chunks], side, level, target, strict)
+        for k in range(chunks)
+    ]
+    with ProcessPoolExecutor(
+        max_workers=n_jobs, mp_context=multiprocessing.get_context("spawn")
+    ) as pool:
+        return total + sum(pool.map(_count_chunk_in_process, work))
+
+
+def _count_border_cell(
+    prepared: "PreparedGeometry", quadrant: str, column: int, row: int, resolution: int
+) -> int:
+    """Count one base cell of the last lattice column, by its absorbing walk."""
+    walk = _BorderWalk(quadrant)
+    root = f"{quadrant}{DESCENT_OPEN}{column:0{RES1_DIGITS}d}"
+    root += f"{RES1_SEPARATOR}{row:0{RES1_DIGITS}d}{DESCENT_CLOSE}"
+    return _count_border_node(prepared, walk, root, 1, resolution, "center", None)
+
+
+def _count_meridian(
+    plane: "BaseGeometry", lattices: dict[str, "_LatticeView"], resolution: int
+) -> int:
+    """Count the prime-meridian column, which no quadrant piece holds."""
+    meridian = _meridian_rows(plane)
+    if not meridian:
+        return 0
+    from shapely.prepared import prep
+
+    prepared_plane = prep(plane)
+    total = 0
+    for hemisphere, row in meridian:
+        if row == _POLAR_ROW:
+            walk = _BorderWalk(hemisphere + "E", sheared=False)
+            root = (
+                f"{hemisphere}E{DESCENT_OPEN}{0:0{RES1_DIGITS}d}"
+                f"{RES1_SEPARATOR}{row:0{RES1_DIGITS}d}{DESCENT_CLOSE}"
+            )
+            total += _count_border_node(
+                prepared_plane,
+                walk,
+                root,
+                1,
+                resolution,
+                "center",
+                None,
+            )
+            continue
+        total += _count_meridian_node(
+            prepared_plane,
+            lattices,
+            hemisphere,
+            row * _L1,
+            1.0 if hemisphere == "N" else -1.0,
+            _L1,
+            1,
+            resolution,
+        )
+    return total
+
+
+def _count_internal_cells_recursive(polygon: "Polygon", resolution: int) -> int:
+    """The 1.1.0 evaluation of :func:`count_internal_cells`: one node per call.
+
+    Kept as the reference the batched count is held to. Same screening,
+    same base cells, same border and meridian walks; ordinary base cells
+    go through :func:`_count_node`, one Python call per node, in one
+    thread. Slow by design and not part of the public interface.
+    """
+    _check_resolution(resolution)
+    total = 0
+    plane, views = _prepare(polygon, resolution, densify=True)
+    lattices = dict(views)
+    for quadrant, view in views:
+        for column, row, border in _base_cells(
+            view.prepared, view.geometry, quadrant, resolution
+        ):
+            if border:
+                total += _count_border_cell(
+                    view.prepared, quadrant, column, row, resolution
+                )
+            else:
+                total += _count_node(
+                    view.prepared, (column + row) * _L1, row * _L1, _L1, 1, resolution
+                )
+    return total + _count_meridian(plane, lattices, resolution)
+
+
 def count_internal_cells(polygon: "Polygon", resolution: int, n_jobs: int = 1) -> int:
     """Count the cells a polygon covers, without naming any of them.
 
@@ -1969,13 +2330,65 @@ def count_internal_cells(polygon: "Polygon", resolution: int, n_jobs: int = 1) -
     would return the running total at the moment of passing it as though
     it were the count.
 
+    **How the descent is evaluated.** Level by level, in arrays. Every
+    node of a level is asked the questions :func:`_count_node` asks --
+    does the geometry meet the square, does it contain it -- with one
+    Shapely call per question for up to :data:`_COUNT_BATCH` squares,
+    instead of one call per square. The squares are the same
+    floating-point squares, built with the same arithmetic in the same
+    order, and the predicates are the same prepared predicates, so the
+    count is the one the recursive descent returns. That descent is kept
+    as :func:`_count_internal_cells_recursive`, the reference the tests
+    hold this one to. What changed is the cost. The recursive descent
+    spent about 9 microseconds on each node, nearly all of it in the
+    interpreter, and the batched one spends about a quarter of a
+    microsecond on the same nodes: 320 973 of them under a square
+    kilometre at resolution 11, counted in 2.8 s by release 1.1.0 and in
+    0.074 s here. Serially, the same square at resolution 13 went from
+    34 s to 0.74 s, and a one-degree box at resolution 9 from 43 s to
+    1.25 s, 46 and 34 times faster, with the same counts. Measured on one
+    Linux machine with two cores, Python 3.12, Shapely 2.2 and GEOS 3.14.
+
+    **The gain is the ordinary cells'.** The walks of the last lattice
+    column, the polar row, the caps and the prime-meridian column still
+    descend one node at a time, as in release 1.1.0, and cost what they
+    cost there: ``box(10.0, 89.983, 10.5, 89.9835)``, a patch of the
+    polar row, took 34 s at resolution 11 in either release, on the same
+    machine.
+
+    A leaf at the target resolution is decided by its centre alone
+    (:func:`_count_leaves` says why that is the same answer), unless the
+    lattice piece is not a valid geometry; then the leaf is decided the
+    way :func:`_count_node` decides it.
+
+    **Workers.** ``n_jobs`` above 1 spreads the descent over processes,
+    not threads. In release 1.1.0 two threads made the count slower than
+    one -- 4.1 times, for the one-degree box at resolution 7 on the
+    machine above -- because every scalar Shapely call handed the
+    interpreter lock to the other thread. The descent runs in this
+    process until its frontier holds a few hundred nodes per worker; the
+    frontier is then dealt out in interleaved chunks. A count too small to
+    repay starting the workers (:data:`_PARALLEL_MIN_NODES`) never leaves
+    this process. On two workers the one-degree box at resolution 9 took
+    0.73 s against 1.25 s on one.
+
+    The workers are started by ``spawn`` on every system, Linux included:
+    a process forked from a parent with another thread alive -- a
+    notebook kernel, a server -- can deadlock. So a script whose count
+    reaches the workers needs the ``if __name__ == "__main__":`` guard on
+    every system. Without it each worker runs the script again as it
+    starts, and the count fails with
+    :class:`concurrent.futures.process.BrokenProcessPool`. A notebook
+    needs no guard. The count does not depend on ``n_jobs``.
+
     Provenance: ``itacart_core/cell_filling.py``
     (``polygon_to_cells_count``).
 
     Args:
         polygon: A Shapely polygon in EPSG:4326.
         resolution: Target resolution level, 1 to 13.
-        n_jobs: Worker count; above 1 spreads base cells over threads.
+        n_jobs: Worker processes; above 1 spreads a large descent over
+            processes (see **Workers**). The count does not depend on it.
 
     Returns:
         Number of cells whose centre lies inside the polygon.
@@ -1985,7 +2398,10 @@ def count_internal_cells(polygon: "Polygon", resolution: int, n_jobs: int = 1) -
             extension zone.
         DomainError: If a position lies outside the latitude domain.
         GeometryError: If the polygon is not a valid geometry; it is refused,
-            not repaired.
+            not repaired. And from resolution 11, if the polygon reaches
+            the cell that holds a pole at resolution 10, whose children
+            cannot be enumerated: a known limitation, stated in
+            :mod:`itacart.hierarchy`.
     """
     _check_resolution(resolution)
     _check_jobs(n_jobs)
@@ -1993,66 +2409,15 @@ def count_internal_cells(polygon: "Polygon", resolution: int, n_jobs: int = 1) -
     plane, views = _prepare(polygon, resolution, densify=True)
     lattices = dict(views)
     for quadrant, view in views:
-
-        def _one(
-            base: tuple[int, int, bool],
-            _v: "_LatticeView" = view,
-            _q: str = quadrant,
-        ) -> int:
-            column, row, border = base
-            if border:
-                walk = _BorderWalk(_q)
-                root = f"{_q}{DESCENT_OPEN}{column:0{RES1_DIGITS}d}"
-                root += f"{RES1_SEPARATOR}{row:0{RES1_DIGITS}d}{DESCENT_CLOSE}"
-                return _count_border_node(
-                    _v.prepared,
-                    walk,
-                    root,
-                    1,
-                    resolution,
-                    "center",
-                    None,
-                )
-            return _count_node(
-                _v.prepared, (column + row) * _L1, row * _L1, _L1, 1, resolution
-            )
-
         cells = _base_cells(view.prepared, view.geometry, quadrant, resolution)
-        total += sum(_map_jobs(cells, _one, n_jobs))
-
-    meridian = _meridian_rows(plane)
-    if meridian:
-        from shapely.prepared import prep
-
-        prepared_plane = prep(plane)
-        for hemisphere, row in meridian:
-            if row == _POLAR_ROW:
-                walk = _BorderWalk(hemisphere + "E", sheared=False)
-                root = (
-                    f"{hemisphere}E{DESCENT_OPEN}{0:0{RES1_DIGITS}d}"
-                    f"{RES1_SEPARATOR}{row:0{RES1_DIGITS}d}{DESCENT_CLOSE}"
+        ordinary = [(column, row) for column, row, border in cells if not border]
+        total += _count_ordinary(view.geometry, ordinary, resolution, n_jobs)
+        for column, row, border in cells:
+            if border:
+                total += _count_border_cell(
+                    view.prepared, quadrant, column, row, resolution
                 )
-                total += _count_border_node(
-                    prepared_plane,
-                    walk,
-                    root,
-                    1,
-                    resolution,
-                    "center",
-                    None,
-                )
-                continue
-            total += _count_meridian_node(
-                prepared_plane,
-                lattices,
-                hemisphere,
-                row * _L1,
-                1.0 if hemisphere == "N" else -1.0,
-                _L1,
-                1,
-                resolution,
-            )
-    return total
+    return total + _count_meridian(plane, lattices, resolution)
 
 
 # --------------------------------------------------------------------------
@@ -2129,7 +2494,12 @@ def vertex_to_cell(
         dedupe_consecutive: Collapse consecutive duplicates.
 
     Returns:
-        Atomic index strings in traversal order.
+        Atomic index strings in traversal order, one per vertex kept, each
+        the cell :func:`itacart.cells.geo_to_cell` answers for it. So a
+        vertex inside the cell that holds a pole at resolution 10 can come
+        back, at resolutions 11 and 12, as a spelling that names no cell,
+        which :func:`itacart.boundary.is_valid_cell` denies: a known
+        limitation, stated in :mod:`itacart.cells`.
 
     Raises:
         UnsupportedGeometryTypeError: On unsupported geometry types.

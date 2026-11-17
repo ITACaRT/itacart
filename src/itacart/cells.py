@@ -43,6 +43,19 @@ the only one left in a fine row the position is carried onto the meridian.
 That the answer exists is measured, not proven: every answer over the
 lattices the test suite enumerates, both caps at every resolution
 included, is confirmed by :func:`itacart.boundary.is_valid_cell`.
+
+**A known limitation.** Those lattices miss an exception. Inside the cell
+that holds a pole at resolution 10 -- ``NE(0000/1000(1(B2(4(E5(4(B2(4(A1(4))))))))))``
+at the north pole and its twin under ``SE`` at the south -- the answer at
+resolutions 11 and 12 can be a spelling that names no cell: one that
+:func:`itacart.boundary.is_valid_cell` denies, and that the functions
+taking a cell then refuse. Four positions are known to be answered so, at
+longitude +/-155.0390625 and latitude +/-89.99999962902984, at both
+resolutions; at (155.0390625, 89.99999962902984) and resolution 11 the
+answer is ``NE(0000/1000(1(B2(4(E5(4(B2(4(A1(4(B4)))))))))))``. Every name
+that addresses a position inherits it, and a named test pins the four
+answers, so that it fails when this is fixed. The same cell is not
+refined either, as :mod:`itacart.hierarchy` states.
 """
 
 from __future__ import annotations
@@ -313,7 +326,11 @@ def geo_to_cell(lon: float, lat: float, resolution: int) -> str:
     Returns:
         The atomic compositional index of the containing cell. Over every
         lattice the test suite enumerates, both caps at every resolution
-        included, :func:`itacart.boundary.is_valid_cell` confirms it.
+        included, :func:`itacart.boundary.is_valid_cell` confirms it. Not
+        inside the cell that holds a pole at resolution 10: there, at
+        resolutions 11 and 12, the answer can be a spelling that names no
+        cell, which the predicate denies (a known limitation; see the
+        module's notes).
 
     Raises:
         ResolutionError: If ``resolution`` is out of range.
@@ -341,7 +358,11 @@ def sinusoidal_to_cell(x: float, y: float, resolution: int) -> str:
         resolution: Target resolution level, 1 to 13.
 
     Returns:
-        The atomic compositional index of the containing cell.
+        The atomic compositional index of the containing cell. Inside the
+        cell that holds a pole at resolution 10, at resolutions 11 and 12,
+        it can be a spelling that names no cell, which
+        :func:`itacart.boundary.is_valid_cell` denies (a known limitation;
+        see the module's notes).
 
     Raises:
         ResolutionError: If ``resolution`` is out of range.
@@ -741,12 +762,12 @@ def cell_to_boundary(
     """Geodetic vertices bounding a cell, counter-clockwise.
 
     Four vertices for a parallelogram, three for a prime-meridian
-    triangle, four for a trapezoid clipped on its meridian side. A
-    trapezoid clipped where the border line leans faster than the cell's
-    own side -- which happens above roughly 18.5 degrees of latitude,
-    where the border crosses more than one column per row -- keeps three
-    or five instead, since a line through a convex quadrilateral can
-    leave any of those.
+    triangle, four for a trapezoid clipped on its meridian side, so a
+    ring has three or four. The trapezoid keeps four even where the
+    border line leans faster than the cell's own side -- above roughly
+    18.5 degrees of latitude, where the border crosses more than one
+    column per row -- because its outer side is carried onto the border
+    rather than cut by it.
 
     The ring is counter-clockwise in every quadrant. That is not free:
     mirroring the NE octant into NW or SE reverses orientation, so the

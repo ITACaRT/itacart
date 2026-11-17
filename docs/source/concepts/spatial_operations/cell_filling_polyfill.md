@@ -116,9 +116,27 @@ is the general treatment;
 [Parcel Representation](../cadastral_workflows/parcel_representation.md) is the
 cadastral one.
 
-## Parallel filling
+## Workers
 
-With the `parallel` extra installed, the descent can be spread across workers
-by passing `n_jobs`. It is worth it for large parcels at fine resolutions and
-not worth it otherwise — the descent is already cheap relative to the area it
-covers.
+`polyfill` runs in the calling thread whatever `n_jobs` says, and no extra
+changes that. The parameter is accepted and validated, so calls that pass it
+keep working. Until release 1.2.0 the fill spread its descent over threads, and
+two threads made it slower than one: every Shapely call in the descent handed
+the interpreter lock to the other thread.
+
+Counting is where workers pay. `count_internal_cells` asks a whole level of the
+descent at a time, in arrays, and with `n_jobs` above 1 it deals a large
+descent out to processes. They are started by `spawn` on every system, so a
+script whose count reaches them needs an `if __name__ == "__main__":` guard
+around its entry point. A notebook does not, and neither does this page, which
+counts a one-degree box on two workers:
+
+```{code-cell} python
+from shapely.geometry import box
+
+region = box(-48.0, -16.0, -47.0, -15.0)
+geometry.count_internal_cells(region, 9, n_jobs=2) == geometry.count_internal_cells(region, 9)
+```
+
+A count too small to repay starting the processes never leaves the calling
+one, so `n_jobs` changes the time a count takes and never the count.

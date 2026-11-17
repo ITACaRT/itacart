@@ -4,29 +4,28 @@
 $ pip install itacart
 ```
 
-Python 3.10 or newer. The only hard runtime dependency is `shapely`; the
-ellipsoidal sinusoidal projection is computed from the paper's equations, so
-PROJ is never called at run time and there is no compiled geospatial stack to
-install.
+Python 3.10 or newer. The runtime dependencies are `shapely` and `numpy`, and
+Shapely requires `numpy` as well, so nothing is installed beyond what Shapely
+brings. The ellipsoidal sinusoidal projection is computed from the paper's
+equations, so PROJ is never called at run time and there is no compiled
+geospatial stack to install.
 
 ## Optional extras
 
-Two extras add capability rather than replacing anything:
+One extra adds capability:
 
 ```console
 $ pip install "itacart[geo]"       # GeoDataFrame import and export
-$ pip install "itacart[parallel]"  # cell filling across several processes
 ```
 
 `geo` pulls in `geopandas` and enables the GeoDataFrame side of
 [GeoJSON and interoperability](../concepts/data_and_interoperability/index.md).
-`parallel` pulls in `joblib` and is what lets
-[polyfill](../concepts/spatial_operations/cell_filling_polyfill.md) use more
-than one worker. Both can be combined:
 
-```console
-$ pip install "itacart[geo,parallel]"
-```
+Workers need no extra. `count_internal_cells` spreads a large count over
+processes from the standard library, and
+[polyfill](../concepts/spatial_operations/cell_filling_polyfill.md) runs
+serially whatever `n_jobs` says. Release 1.2.0 removed the `parallel` extra,
+which installed `joblib` and nothing in the package used.
 
 ## From source
 

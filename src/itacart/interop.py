@@ -489,12 +489,19 @@ def from_geojson(
             of dimension zero.
 
     Returns:
-        One compositional index per input geometry, in file order.
+        One compositional index per input geometry, in file order. A point
+        inside the cell that holds a pole at resolution 10 is answered, at
+        resolutions 11 and 12, with the spelling
+        :func:`itacart.cells.geo_to_cell` gives it, which can name no
+        cell: a known limitation, stated in :mod:`itacart.cells`.
 
     Raises:
         ValueError: If ``containment`` is not one of the three predicates.
         GeometryError: If a geometry of dimension zero is empty, or if a
-            fill keeps no cell.
+            fill keeps no cell. And from resolution 11, if a line or a
+            polygon reaches the cell that holds a pole at resolution 10,
+            whose children cannot be enumerated: a known limitation,
+            stated in :mod:`itacart.hierarchy`.
         UnsupportedGeometryTypeError: If a geometry is of a type the
             reader cannot draw. The geometry library raises its own error
             for that, which is outside this package's hierarchy, so one
@@ -600,10 +607,15 @@ def from_geodataframe(
             :func:`itacart.geometry.polyfill`.
 
     Returns:
-        One compositional index per row, in row order.
+        One compositional index per row, in row order, as
+        :func:`from_geojson` answers it, the known limitation of a point
+        inside the cell that holds a pole at resolution 10 included.
 
     Raises:
         ImportError: If GeoPandas is not installed.
+        GeometryError: As :func:`from_geojson` raises it, the refusal of a
+            geometry that reaches the cell that holds a pole at resolution
+            10 included.
     """
     _import_geopandas()
     frame = gdf if gdf.crs is None else gdf.to_crs("EPSG:4326")

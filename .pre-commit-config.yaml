@@ -58,9 +58,11 @@ repos:
 
   # -- Types ----------------------------------------------------------------
   # Mirrors `mypy src`. Restricted to src/ on purpose: the tests are checked
-  # separately and should not block a commit of source code.
+  # separately and should not block a commit of source code. No older than
+  # v2.4: geometry.py reads numpy's stubs, which use `type` statements, and
+  # earlier versions refuse them while checking for Python 3.10.
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v2.3.1
+    rev: v2.4.1
     hooks:
       - id: mypy
         args: [--strict]

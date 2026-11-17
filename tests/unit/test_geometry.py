@@ -835,32 +835,76 @@ def test_every_exempted_door_is_really_on_the_count_path(parcel: Polygon) -> Non
                 itacart.count_internal_cells(parcel, 7)
 
 
-def test_count_stack_depth_is_the_resolution_difference(parcel: Polygon) -> None:
-    """Recursion depth is bounded by the resolution, not by the cell count."""
-    seen: list[int] = []
-    original = geometry._count_node
+def test_count_stack_depth_is_the_resolution_difference(
+    parcel: Polygon, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Recursion depth is bounded by the resolution, not by the cell count.
+
+    The batched descent takes one frame per level and never one per node
+    or per batch: a batch is descended to the target before the next is
+    read. Batches of seven nodes make every level many batches wide, and
+    the depth still stops at the resolution. The count does not move
+    with the batch either, since it is a sum of integers.
+    """
+    levels: list[int] = []
+    depth = [0, 0]  # current, deepest
+    original = geometry._count_nodes_batched
 
     def _traced(
-        prepared: object,
-        u0: float,
-        v0: float,
+        lattice: object,
+        u0: object,
+        v0: object,
         side: float,
         level: int,
         target: int,
-        containment: str = "center",
+        strict: bool,
     ) -> int:
-        seen.append(level)
-        return original(  # type: ignore[arg-type]
-            prepared, u0, v0, side, level, target, containment
-        )
+        levels.append(level)
+        depth[0] += 1
+        depth[1] = max(depth[1], depth[0])
+        try:
+            return original(  # type: ignore[arg-type]
+                lattice, u0, v0, side, level, target, strict
+            )
+        finally:
+            depth[0] -= 1
 
-    geometry._count_node = _traced  # type: ignore[assignment]
-    try:
-        itacart.count_internal_cells(parcel, 6)
-    finally:
-        geometry._count_node = original  # type: ignore[assignment]
-    assert max(seen) <= 6
-    assert min(seen) == 1
+    whole = itacart.count_internal_cells(parcel, 6)
+    monkeypatch.setattr(geometry, "_COUNT_BATCH", 7)
+    monkeypatch.setattr(geometry, "_count_nodes_batched", _traced)
+    assert itacart.count_internal_cells(parcel, 6) == whole
+    assert min(levels) == 1
+    assert max(levels) == 6
+    assert depth[1] == 6
+    assert len(levels) > 10 * depth[1]
+
+
+def test_ordinary_cells_are_not_counted_one_node_at_a_time(
+    parcel: Polygon, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The public count takes the batched descent, and not the recursive one.
+
+    Both give the same count, so a return to the node-by-node path would
+    pass every count in the suite and show only on the clock. The path is
+    asserted by calls instead of seconds. The parcel is clear of every
+    border family, whose walks still descend node by node where a branch
+    leaves the family; the reference descent, which takes the recursive
+    path on purpose, is the control that the spy sees the calls it is
+    there to see.
+    """
+    calls = [0]
+    original = geometry._count_node
+
+    def _spy(*args: object, **kwargs: object) -> int:
+        calls[0] += 1
+        return original(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(geometry, "_count_node", _spy)
+    public = itacart.count_internal_cells(parcel, 6)
+    assert calls[0] == 0
+    reference = geometry._count_internal_cells_recursive(parcel, 6)
+    assert calls[0] > 1_000
+    assert public == reference
 
 
 # --------------------------------------------------------------------------
@@ -1544,14 +1588,44 @@ def test_compact_covers_the_same_ground(parcel: Polygon) -> None:
     assert expanded == uniform
 
 
-def test_threads_and_serial_agree(parcel: Polygon) -> None:
+def test_the_worker_count_never_changes_the_answer(parcel: Polygon) -> None:
     """The worker count changes the schedule, never the answer."""
     serial = itacart.polyfill(parcel, 6, n_jobs=1)
-    threaded = itacart.polyfill(parcel, 6, n_jobs=4)
-    assert serial == threaded
+    four = itacart.polyfill(parcel, 6, n_jobs=4)
+    assert serial == four
     assert itacart.count_internal_cells(parcel, 6, n_jobs=4) == (
         itacart.count_internal_cells(parcel, 6, n_jobs=1)
     )
+
+
+def test_polyfill_starts_no_thread_whatever_the_worker_count(
+    parcel: Polygon, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``n_jobs`` above 1 fills in the calling thread, with the serial answer.
+
+    Two threads made the fill slower than one, so it runs in series for
+    every worker count until it has a batched descent of its own. Every
+    thread start is recorded, so a pool coming back fails here; the
+    recorder is first shown to see the threads of a pool.
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    started: list[str] = []
+    real_start = threading.Thread.start
+
+    def recording(self: threading.Thread) -> None:
+        started.append(self.name)
+        real_start(self)
+
+    monkeypatch.setattr(threading.Thread, "start", recording)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert list(pool.map(abs, [-1, -2, -3])) == [1, 2, 3]
+    assert started
+    started.clear()
+    serial = itacart.polyfill(parcel, 6)
+    assert itacart.polyfill(parcel, 6, n_jobs=4) == serial
+    assert started == []
 
 
 def test_count_rejects_a_bad_resolution(parcel: Polygon) -> None:

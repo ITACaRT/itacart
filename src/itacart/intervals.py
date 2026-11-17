@@ -175,6 +175,10 @@ def cells_to_intervals(index: str, resolution: int | None = None) -> list[Interv
             than a cell of the index, or if a quadrant is to be expanded:
             its descendants are the resolution-1 lattice, which the
             hierarchy does not enumerate either.
+        GeometryError: If the expansion reaches the cell that holds a pole
+            at resolution 10, whose children cannot be enumerated: the
+            cells found leave part of its ring uncovered. A known
+            limitation, stated in :mod:`itacart.hierarchy`.
 
     Example:
         >>> from itacart import cell_to_int

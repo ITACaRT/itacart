@@ -3,6 +3,99 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [SemVer](https://semver.org/).
 
+## [1.2.0] - 2026-11-17
+
+The count asks a whole level of its descent at a time. The counts are the ones
+release 1.1.0 returns; what changes is how long they take, how workers start,
+and a dependency the count now imports. With them come corrections to the
+documentation and the declaration of a limitation at the poles.
+
+### Changed
+
+- `count_internal_cells` evaluates its descent a level at a time, in arrays.
+  The nodes, the squares and the predicates are those of release 1.1.0: every
+  square is built with the same floating-point arithmetic in the same order
+  and asked the same prepared predicates, with one Shapely call for up to
+  50 000 squares instead of one call per square. A leaf is decided by its
+  centre, which is the answer the three questions of 1.1.0 give on a valid
+  geometry; where the polygon's piece on the lattice is not a valid geometry,
+  the leaf is asked those three questions. The counts are identical. They are
+  pinned against twenty counts taken with 1.1.0 and against the recursive
+  descent of 1.1.0, which stays in the package as the reference: on the public
+  cases, and on 600 random polygons in the plane of the lattice, a number the
+  release check raised to 15 000 with no divergence. Serially, on one Linux
+  machine with two cores, Python 3.12, Shapely 2.2 and GEOS 3.14, a square
+  kilometre at resolution 13 went from 34 s to 0.74 s, and a one-degree box at
+  resolution 9 from 43 s to 1.25 s. The gain is the ordinary cells'. The walks
+  of the last lattice column of a row, the polar row, the caps and the
+  prime-meridian column still descend one node at a time, and a patch of the
+  polar row that took 34 s at resolution 11 in 1.1.0 still does.
+- **`count_internal_cells(..., n_jobs > 1)` spreads a large descent over
+  processes instead of threads, started by `spawn` on every system, Linux
+  included. A script whose count reaches the processes now needs an
+  `if __name__ == "__main__":` guard around its entry point, on every system:
+  without it each worker runs the script again as it starts, and the count
+  fails with `BrokenProcessPool`.** A notebook needs no guard, and a count too
+  small to repay starting the workers stays in the calling process and needs
+  none either. `spawn`, and not the platform's default, because a process
+  forked from a parent with another thread alive -- a notebook kernel, a
+  server -- can deadlock, and Python warns that it may. In 1.1.0 two threads
+  made the count 4.1 times slower than one, for the one-degree box at
+  resolution 7; on two processes the box at resolution 9 takes 0.73 s against
+  1.25 s on one. The count does not depend on `n_jobs`.
+- `polyfill` runs in the calling thread whatever `n_jobs` says. In 1.1.0 it
+  spread its descent over threads, and two threads made it 3.9 times slower
+  than one, for the one-degree box at resolution 5. The parameter is accepted
+  and validated as before, and the fill is the same.
+- `numpy` is a declared runtime dependency, from 1.14, the floor Shapely 2.0
+  already requires, so installing the package installs nothing new. The
+  batched count imports it.
+- The package summary reads "Mapping — Designed" where it read
+  "Mapping-Designed".
+
+### Removed
+
+- The `parallel` extra. It installed `joblib`, which no module of the package
+  ever imported. Asked for `itacart[parallel]`, pip still installs the
+  package, and warns that it provides no such extra.
+
+### Fixed
+
+- The documentation promised what the package did not do. The installation
+  page and the README said the `parallel` extra filled cells across several
+  processes, and the page on cell filling that spreading the fill over workers
+  paid off for large parcels. In 1.1.0 the fill used threads with or without
+  the extra, and was slower on two of them. The pages now say what `n_jobs`
+  does.
+- The page on the TreeBlob said a blob holds one quadrant. It holds one group
+  per quadrant the index names, and the page now encodes an index over three
+  quadrants and reads it back whole.
+- The docstring of `cell_to_boundary` said a trapezoid could keep three or
+  five vertices. A ring has three or four: the trapezoid's outer side is
+  carried onto the border rather than cut by it.
+
+### Known limitations
+
+Stated in the modules that own it, `hierarchy` and `cells`, and pinned by named
+tests that fail when it is lifted.
+
+- **The cell that holds a pole at resolution 10 is not refined.**
+  `get_children` raises `GeometryError` for it as its result is iterated, and
+  so do `cell_to_children`, which is the same function, and `get_descendants`,
+  `uncompact_cells` and `cells_to_intervals` that go from resolution 10 to 11
+  there; `count_internal_cells`, `polyfill`, `from_geojson` and
+  `from_geodataframe` raise it for a geometry that reaches the cell, from
+  resolution 11. Inside the cell, at resolutions 11 and 12, `geo_to_cell` can
+  answer with a spelling that names no cell, and so can `latlng_to_cell`,
+  `sinusoidal_to_cell`, `vertex_to_cell`, and `from_geojson` and
+  `from_geodataframe` for a point: `is_valid_cell` denies the spelling, and
+  the functions that take a cell then refuse it. That is an exception to the
+  rule that no function answers with a cell that does not exist. Four
+  positions are known to be answered so, at longitude ±155.0390625 and
+  latitude ±89.99999962902984.
+
+  Releases 1.0.0 and 1.1.0 behaved the same, in every name they had.
+
 ## [1.1.0] - 2026-10-30
 
 Three features: an integer for every cell, a region as ranges of those

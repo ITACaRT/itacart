@@ -111,7 +111,7 @@ autodoc_typehints = "description"
 autodoc_preserve_defaults = True
 # Only the optional extras are mocked. shapely is a hard runtime dependency,
 # so mocking it would render every shapely type in a signature as a mock.
-autodoc_mock_imports = ["geopandas", "joblib"]
+autodoc_mock_imports = ["geopandas"]
 
 # Google style throughout, as the repository already had it. The one file that
 # used NumPy style, itacart_core/compositional_index.py, is an origin document

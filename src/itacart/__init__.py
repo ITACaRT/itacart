@@ -25,7 +25,7 @@ aligned with :func:`itacart.index.decompose` order.
 
 from __future__ import annotations
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __paper_doi__ = "10.14393/rbcv77n0a-79281"
 
 # -- Constants --------------------------------------------------------------
@@ -265,7 +265,13 @@ from .topology import (
 
 
 def latlng_to_cell(lat: float, lng: float, resolution: int) -> str:
-    """H3-style alias of :func:`geo_to_cell` taking ``(lat, lng)``."""
+    """H3-style alias of :func:`geo_to_cell` taking ``(lat, lng)``.
+
+    It answers what :func:`geo_to_cell` answers, the known limitation
+    included: inside the cell that holds a pole at resolution 10, at
+    resolutions 11 and 12, the answer can be a spelling that names no
+    cell, which :func:`is_valid_cell` denies.
+    """
     return geo_to_cell(lng, lat, resolution)
 
 

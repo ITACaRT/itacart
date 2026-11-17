@@ -24,11 +24,13 @@ licence for a function that has quietly changed behaviour.
 from __future__ import annotations
 
 import inspect
+import itertools
 import re
 from typing import Any, Callable, Iterator
 
 import pytest
 from _pytest.outcomes import Failed
+from shapely.geometry import Point, Polygon, box, mapping
 
 import itacart
 from itacart.exceptions import (
@@ -1003,6 +1005,339 @@ def test_the_fourth_form_no_longer_hides_an_escape() -> None:
         itacart.from_geojson({"type": "Nope"}, 1)
     assert isinstance(caught.value, ITACaRTError)
     assert isinstance(caught.value.__cause__, ShapelyError)
+
+
+# --------------------------------------------------------------------------
+# The cell that holds a pole at resolution 10
+# --------------------------------------------------------------------------
+#
+# A known limitation of this release, at both poles. The two cells exist,
+# and their children cannot be enumerated: the cells found leave part of
+# the ring uncovered. Inside them, at resolutions 11 and 12, positions are
+# answered with spellings the predicate denies. Everything below pins the
+# behaviour by equality, so that fixing either turns it red.
+
+POLE_CELLS = (
+    "NE(0000/1000(1(B2(4(E5(4(B2(4(A1(4))))))))))",
+    "SE(0000/1000(1(B2(4(E5(4(B2(4(A1(4))))))))))",
+)
+
+#: A cell of the same cap and resolution that is not the pole's, and an
+#: ordinary cell: what is refused for them as well is the call's shape or a
+#: restriction declared before, and not the limitation.
+CAP_CELL_AT_10 = "NE(0000/1000(1(A2(3(D1(1(E5(3(D4(4))))))))))"
+ORDINARY_AT_10 = "SW(0476/0259(4(E5(4(E2(2(B4(1(B4(2))))))))))"
+AT_10 = POLE_CELLS + (CAP_CELL_AT_10, ORDINARY_AT_10)
+ROW_1000_AT_10 = frozenset(POLE_CELLS + (CAP_CELL_AT_10,))
+
+
+def _not_refined(cell: str) -> str:
+    return (
+        f"the children of {cell!r} could not be enumerated: the cells found "
+        "leave part of its ring uncovered, so they do not partition it"
+    )
+
+
+#: Where the call shapes of the resolution-1 sweep do not fit a cell of
+#: resolution 10: a neighbour at the cell's own resolution, the cell's own
+#: position under its parent, and a target one level finer for the names
+#: that take one, so that they refine the cell. Without the first three, an
+#: ordinary cell of resolution 10 is refused for the call's shape, which
+#: the ordinary control reports.
+CALLS_AT_10: dict[str, Callable[[str], Any]] = {
+    "are_neighbor_cells": lambda c: itacart.are_neighbor_cells(c, _neighbour(c)),
+    "cells_to_intervals": lambda c: itacart.cells_to_intervals(c, resolution=11),
+    "child_position": lambda c: itacart.child_position(c),
+    "get_descendants": lambda c: list(itacart.get_descendants(c, 11)),
+    "uncompact_cells": lambda c: list(itacart.uncompact_cells(c, 11)),
+}
+
+#: The refusals of the sweep at resolution 10, asserted by equality. The
+#: first five are the limitation, and only the two pole cells meet them.
+#: The rest were declared before this release: compactness refuses a cell
+#: whose ring visits the pole twice, the binary codecs do not serialize row
+#: 1000, and ``deflect`` steps on the resolution-1 lattice alone.
+DECLARED_REFUSALS_AT_10: dict[tuple[str, str], tuple[str, frozenset[str]]] = {
+    ("cell_to_children", "GeometryError"): (
+        "could not be enumerated",
+        frozenset(POLE_CELLS),
+    ),
+    ("cells_to_intervals", "GeometryError"): (
+        "could not be enumerated",
+        frozenset(POLE_CELLS),
+    ),
+    ("get_children", "GeometryError"): (
+        "could not be enumerated",
+        frozenset(POLE_CELLS),
+    ),
+    ("get_descendants", "GeometryError"): (
+        "could not be enumerated",
+        frozenset(POLE_CELLS),
+    ),
+    ("uncompact_cells", "GeometryError"): (
+        "could not be enumerated",
+        frozenset(POLE_CELLS),
+    ),
+    ("compactness", "GeometryError"): ("has no compactness", frozenset(POLE_CELLS)),
+    ("deflect", "ResolutionError"): ("is not a resolution-1 cell", frozenset(AT_10)),
+    ("encode_geometry", "GeometryError"): ("does not serialize", ROW_1000_AT_10),
+    ("encode_node", "InvalidIndexError"): ("does not serialize", ROW_1000_AT_10),
+    ("encode_tree", "InvalidIndexError"): ("does not serialize", ROW_1000_AT_10),
+    ("recompose_to_prefix_form", "InvalidIndexError"): (
+        "does not serialize",
+        ROW_1000_AT_10,
+    ),
+    ("serialize_to_blob", "InvalidIndexError"): (
+        "does not serialize",
+        ROW_1000_AT_10,
+    ),
+}
+
+
+def _denied_in(result: Any) -> list[str]:
+    """Every cell named by a result, at any depth, that the predicate denies.
+
+    The resolution-1 sweep reads atoms of resolution 1 out of whatever a
+    name returns. A cell of resolution 10 is answered with spellings of its
+    own depth and finer, which that pattern does not see.
+    """
+    texts = [result] if isinstance(result, str) else result
+    if not isinstance(texts, (list, tuple)):
+        return []
+    return [
+        cell
+        for text in texts
+        if isinstance(text, str) and itacart.is_valid_index(text)
+        for cell in itacart.iter_cells(text)
+        if not itacart.is_valid_cell(cell)
+    ]
+
+
+def _sweep_at_10(
+    corpus: tuple[str, ...] = AT_10,
+) -> tuple[dict[tuple[str, str], set[str]], set[tuple[str, str]], list[str], list[str]]:
+    """The resolution-1 sweep, over the four cells of resolution 10."""
+    refusals: dict[tuple[str, str], set[str]] = {}
+    unbuildable: set[tuple[str, str]] = set()
+    wrong_reason: list[str] = []
+    escapes: list[str] = []
+    for name in _takes_a_cell():
+        for cell in corpus:
+            try:
+                if name in CALLS_AT_10:
+                    result = CALLS_AT_10[name](cell)
+                else:
+                    result = _hand(name, cell)
+            except _Unbuildable:
+                unbuildable.add((name, cell))
+                continue
+            except ITACaRTError as exc:
+                key = (name, type(exc).__name__)
+                refusals.setdefault(key, set()).add(cell)
+                declared = DECLARED_REFUSALS_AT_10.get(key)
+                if declared is not None and declared[0] not in str(exc):
+                    wrong_reason.append(f"{name}({cell!r}): {exc}")
+                continue
+            escapes.extend(f"{name}({cell!r}) emitted {c}" for c in _denied_in(result))
+    return refusals, unbuildable, wrong_reason, escapes
+
+
+@pytest.mark.slow
+def test_the_cell_that_holds_a_pole_at_resolution_10_is_not_refined() -> None:
+    """Every name that refines that cell refuses it, and no other name does.
+
+    The census of names that take a cell, handed the two pole cells and the
+    two controls. What is refused for the pole cells alone is the
+    limitation: ``get_children`` -- and ``cell_to_children``, the same
+    function -- ``get_descendants``, ``uncompact_cells`` and
+    ``cells_to_intervals``, each as it goes from resolution 10 to 11.
+    """
+    refusals, unbuildable, wrong_reason, escapes = _sweep_at_10()
+    assert refusals == {
+        key: set(cells) for key, (_, cells) in DECLARED_REFUSALS_AT_10.items()
+    }
+    assert wrong_reason == []
+    assert escapes == []
+    assert unbuildable == {
+        (name, cell) for name in BLOB_READERS for cell in ROW_1000_AT_10
+    }
+    assert sorted(
+        name
+        for (name, _), (_, cells) in DECLARED_REFUSALS_AT_10.items()
+        if cells == frozenset(POLE_CELLS) and name != "compactness"
+    ) == [
+        "cell_to_children",
+        "cells_to_intervals",
+        "get_children",
+        "get_descendants",
+        "uncompact_cells",
+    ]
+
+
+def test_the_sweep_at_10_reports_what_it_is_there_to_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The controls of that sweep, run on the ordinary cell alone.
+
+    A name made to refuse a cell that exists is reported as refusing it,
+    and a spelling the predicate denies is reported at any depth, inside a
+    string or a list of them.
+    """
+    real = itacart.cell_shape
+
+    def refusing(cell: str) -> Any:
+        if cell == ORDINARY_AT_10:
+            raise NonExistentCellError(f"{cell!r} refused for the control")
+        return real(cell)
+
+    monkeypatch.setattr(itacart, "cell_shape", refusing)
+    refusals, _, _, _ = _sweep_at_10((ORDINARY_AT_10,))
+    assert refusals[("cell_shape", "NonExistentCellError")] == {ORDINARY_AT_10}
+    deep = DENIED_SPELLINGS[(POLE_LON, POLE_LAT, 11)]
+    assert _denied_in(deep) == [deep]
+    assert _denied_in([ORDINARY_AT_10, DENIED_WEST]) == [DENIED_WEST]
+    assert _denied_in(ORDINARY_AT_10) == []
+
+
+def test_get_children_refuses_the_pole_cell_as_it_is_iterated() -> None:
+    """The refusal comes out of the iteration, not out of the call.
+
+    ``get_children`` is lazy, as ``get_descendants`` and
+    ``uncompact_cells`` are: a test that only called it would see nothing.
+    """
+    from itacart.exceptions import GeometryError
+
+    cell = POLE_CELLS[0]
+    assert itacart.cell_to_children is itacart.get_children
+    children = itacart.get_children(cell)
+    with pytest.raises(GeometryError) as caught:
+        list(children)
+    assert str(caught.value) == _not_refined(cell)
+
+
+#: The geometries: a cap of 10 microdegrees around each pole, and a box a
+#: few nanodegrees tall at a position inside the north pole's cell.
+NORTH_CAP = Polygon(
+    [(-180.0, 89.99999), (180.0, 89.99999), (180.0, 90.0), (-180.0, 90.0)]
+)
+SOUTH_CAP = Polygon(
+    [(-180.0, -90.0), (180.0, -90.0), (180.0, -89.99999), (-180.0, -89.99999)]
+)
+POLE_LON, POLE_LAT = 155.0390625, 89.99999962902984
+TINY_BOX = box(POLE_LON - 0.01, POLE_LAT - 1e-9, POLE_LON + 0.01, POLE_LAT + 1e-9)
+
+
+@pytest.mark.slow
+def test_a_geometry_that_reaches_the_pole_cell_is_refused_from_resolution_11() -> None:
+    """The names that fill or count a geometry meet the same refusal.
+
+    At resolution 10 they answer: 17 cells in each cap, and nothing in the
+    box, which is narrower than a cell. From resolution 11 the descent has
+    to enumerate the children of the pole cell, and refuses with its words.
+    Pinned at 11, where it starts; each refusal costs seconds.
+    ``from_geodataframe`` reprojects a frame and hands it to
+    ``from_geojson``, so it answers as ``from_geojson`` does.
+    """
+    from itacart.exceptions import GeometryError
+
+    assert itacart.count_internal_cells(NORTH_CAP, 10) == 17
+    assert itacart.count_cells(itacart.polyfill(SOUTH_CAP, 10)) == 17
+    assert itacart.count_internal_cells(TINY_BOX, 10) == 0
+    with pytest.raises(GeometryError, match="narrower than one cell under 'center'"):
+        itacart.from_geojson(mapping(TINY_BOX), 10)
+    for call, geometry, pole in (
+        (itacart.count_internal_cells, NORTH_CAP, POLE_CELLS[0]),
+        (itacart.polyfill, SOUTH_CAP, POLE_CELLS[1]),
+        (lambda g, r: itacart.from_geojson(mapping(g), r), TINY_BOX, POLE_CELLS[0]),
+    ):
+        with pytest.raises(GeometryError) as caught:
+            call(geometry, 11)
+        assert str(caught.value) == _not_refined(pole)
+
+
+#: The four positions known to fall where the spelling names no cell, one
+#: per quadrant of longitude sign and pole.
+INSIDE_THE_POLE_CELLS = tuple(
+    (lon, lat) for lat in (POLE_LAT, -POLE_LAT) for lon in (POLE_LON, -POLE_LON)
+)
+
+#: How each name that answers with cells, and takes no cell, is handed a
+#: position. Derived from the census below rather than listed.
+POSITION_CALLS: dict[str, Callable[[float, float, int], Any]] = {
+    "from_geojson": lambda lon, lat, r: itacart.from_geojson(
+        {"type": "Point", "coordinates": [lon, lat]}, r, containment="intersects"
+    ),
+    "geo_to_cell": lambda lon, lat, r: itacart.geo_to_cell(lon, lat, r),
+    "latlng_to_cell": lambda lon, lat, r: itacart.latlng_to_cell(lat, lon, r),
+    "sinusoidal_to_cell": lambda lon, lat, r: itacart.sinusoidal_to_cell(
+        *itacart.geodetic_to_sinusoidal(lon, lat), r
+    ),
+    "vertex_to_cell": lambda lon, lat, r: itacart.vertex_to_cell(Point(lon, lat), r),
+}
+
+#: The rest of that census, each with the reason it is not swept here.
+NOT_HANDED_A_POSITION = {
+    "from_geodataframe": "reprojects a frame and hands it to from_geojson",
+    "polyfill": "descends from resolution 1 and is refused at the pole cell, "
+    "as the geometry test above pins",
+    "refinement_alphabet": "takes a resolution alone and answers with codes",
+}
+
+#: What those names answer, by equality: at resolutions 11 and 12 the four
+#: positions are spelled under the pole cells, and the predicate denies the
+#: spelling. Every name answers the same, so the table is per position.
+DENIED_SPELLINGS = {
+    (POLE_LON, POLE_LAT, 11): "NE(0000/1000(1(B2(4(E5(4(B2(4(A1(4(B4)))))))))))",
+    (POLE_LON, POLE_LAT, 12): "NE(0000/1000(1(B2(4(E5(4(B2(4(A1(4(B4(3))))))))))))",
+    (-POLE_LON, POLE_LAT, 11): "NE(0000/1000(1(B2(4(E5(4(B2(4(A1(4(D2)))))))))))",
+    (-POLE_LON, POLE_LAT, 12): "NE(0000/1000(1(B2(4(E5(4(B2(4(A1(4(D2(3))))))))))))",
+    (POLE_LON, -POLE_LAT, 11): "SE(0000/1000(1(B2(4(E5(4(B2(4(A1(4(B4)))))))))))",
+    (POLE_LON, -POLE_LAT, 12): "SE(0000/1000(1(B2(4(E5(4(B2(4(A1(4(B4(3))))))))))))",
+    (-POLE_LON, -POLE_LAT, 11): "SE(0000/1000(1(B2(4(E5(4(B2(4(A1(4(D2)))))))))))",
+    (-POLE_LON, -POLE_LAT, 12): "SE(0000/1000(1(B2(4(E5(4(B2(4(A1(4(D2(3))))))))))))",
+}
+
+
+def _answers_with_cells() -> set[str]:
+    """Names that take no cell and whose return annotation carries ``str``."""
+    return {
+        name
+        for name in TAKES_NO_CELL
+        if "str" in str(inspect.get_annotations(getattr(itacart, name)).get("return"))
+    }
+
+
+def test_the_position_census_is_whole() -> None:
+    """Every name that answers with cells from a position is swept or excused."""
+    assert set(POSITION_CALLS) | set(NOT_HANDED_A_POSITION) == _answers_with_cells()
+    assert not set(POSITION_CALLS) & set(NOT_HANDED_A_POSITION)
+
+
+def test_inside_the_pole_cells_a_position_can_be_spelled_as_no_cell() -> None:
+    """At resolutions 11 and 12, four positions are answered with no cell.
+
+    A known limitation of this release, and an exception to the rule that
+    no function answers with a cell that does not exist. Pinned by
+    equality, per name, position and resolution; at resolutions 10 and 13
+    the same positions are answered with cells that exist.
+    """
+    denied: dict[tuple[str, float, float, int], list[str]] = {}
+    for name, call in POSITION_CALLS.items():
+        for (lon, lat), resolution in itertools.product(
+            INSIDE_THE_POLE_CELLS, (10, 11, 12, 13)
+        ):
+            found = _denied_in(call(lon, lat, resolution))
+            if found:
+                denied[(name, lon, lat, resolution)] = found
+    assert denied == {
+        (name, lon, lat, resolution): [spelling]
+        for name in POSITION_CALLS
+        for (lon, lat, resolution), spelling in DENIED_SPELLINGS.items()
+    }
+    for spelling in DENIED_SPELLINGS.values():
+        assert itacart.is_valid_index(spelling)
+        assert not itacart.is_valid_cell(spelling)
+        assert any(itacart.is_ancestor(pole, spelling) for pole in POLE_CELLS)
 
 
 # --------------------------------------------------------------------------
