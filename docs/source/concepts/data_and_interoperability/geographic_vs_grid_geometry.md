@@ -91,21 +91,39 @@ and the settled ones are pinned together, so neither can be read as the other.
 
 Handed such an outline:
 
-- {func}`~itacart.polyfill` under `center` **raises** rather than answering an
-  empty cover, because the figure that comes back holds no cell centre.
+- {func}`~itacart.polyfill` under `center` **never answers the cell**. For four
+  of the six it **raises** rather than answering an empty cover, because the
+  figure that comes back holds no cell centre. For the two absorbers of the
+  eastern quadrants it answers **the cap of their own hemisphere**, a cell the
+  figure barely reaches.
 - Under `intersects` the cell is in the answer, along with the others the
   outline touches.
 - `recover_from_geojson` returns the cell, because it reads the `id`.
 
-An ordinary cell loses less than a thousandth of its figure on the same route.
-The refusal belongs to **this row**, not to the route.
+```{code-cell} python
+from itacart.exceptions import GeometryError
 
-```{figure} ../../../_static/f7/f7_08_border_families_refused.png
-:alt: Which border families are refused on reingestion
-:width: 100%
-
-`docs/_static/f7/f7_08_border_families_refused.png`
+answers = {}
+for cell, _ in census:
+    outline = itacart.cell_to_polygon(cell)
+    try:
+        answers[cell] = itacart.decompose(itacart.polyfill(outline, 1))
+    except GeometryError:
+        answers[cell] = "raises"
+answers
 ```
+
+The cap comes from how the centre rule treats a centre lying on the outline.
+Every absorber of the row comes back with an edge along the meridian, and the
+cap's centroid has `x` equal to zero, so it lies exactly on that edge. The
+[centre rule](../spatial_operations/cell_filling_polyfill.md#a-centre-on-the-outline)
+moves such a centre a micrometre east before it asks, which puts the centroid
+inside the two eastern figures and outside the two western ones. The outline is
+the same one that raises in the other four cases; what it answers depends on
+which side of it the cap's centroid is sent.
+
+An ordinary cell loses less than a thousandth of its figure on the same route.
+The loss belongs to **this row**, not to the route.
 
 ## The rule to carry away
 

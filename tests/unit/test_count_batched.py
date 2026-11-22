@@ -25,6 +25,12 @@ from itacart.resolutions import cell_size, linear_refinement_ratio
 L1 = G._L1
 N_PER_KIND = int(os.environ.get("ITACART_EQUIV_N", "40"))
 
+# The lattice magnitudes used below are Brazil's (u ~ 7.4e6 m, v ~ 2.6e6 m),
+# which lie in the south-western quadrant, so both descents are handed that
+# quadrant's tie-breaking shift: the centre rule as the package applies it
+# there, and not a rule of the test's own.
+SHIFT = G._tie_shift("SW")
+
 # --------------------------------------------------------------------------
 # Lattice-plane cases: the descent itself, without projection
 # --------------------------------------------------------------------------
@@ -40,18 +46,20 @@ def _bases(geom):
     ]
 
 
-def _recursive(geom, target):
+def _recursive(geom, target, shift=SHIFT):
     p = prep(geom)
-    return sum(G._count_node(p, u * L1, r * L1, L1, 1, target) for u, r in _bases(geom))
+    return sum(
+        G._count_node(p, u * L1, r * L1, L1, 1, target, shift) for u, r in _bases(geom)
+    )
 
 
-def _batched(geom, target, strict=False):
+def _batched(geom, target, strict=False, shift=SHIFT):
     g = shapely.from_wkb(geom.wkb)
     shapely.prepare(g)
     b = _bases(geom)
     u0 = np.array([u * L1 for u, _ in b], dtype=float)
     v0 = np.array([r * L1 for _, r in b], dtype=float)
-    return G._count_nodes_batched(g, u0, v0, L1, 1, target, strict)
+    return G._count_nodes_batched(g, u0, v0, L1, 1, target, strict, shift)
 
 
 def _random_node(rng, level):
@@ -186,7 +194,8 @@ def test_the_worker_counts_a_chunk_as_this_process_does():
     In a pool it runs in a child process, which the suite's coverage does
     not measure. Handed one chunk of a real frontier, it has to give what
     the batched descent gives on the same chunk, under either leaf rule,
-    and the chunks have to add up to the count of the whole descent.
+    and the chunks have to add up to the count of the whole descent. The
+    tie-breaking shift travels in the chunk, as the pool sends it.
     """
     rng = np.random.default_rng(5)
     geom = _star(rng, 737 * L1 + 4_000.0, 260 * L1 + 6_000.0, 3_000.0, 24)
@@ -204,10 +213,10 @@ def test_the_worker_counts_a_chunk_as_this_process_does():
         for k in range(chunks):
             cu, cv = fu[k::chunks], fv[k::chunks]
             part = G._count_chunk_in_process(
-                (geom.wkb, cu, cv, side, level, target, strict)
+                (geom.wkb, cu, cv, side, level, target, strict, SHIFT)
             )
             assert part == G._count_nodes_batched(
-                g, cu, cv, side, level, target, strict
+                g, cu, cv, side, level, target, strict, SHIFT
             )
             parts.append(part)
         assert head + sum(parts) == _recursive(geom, target)
@@ -272,17 +281,21 @@ def test_validity_of_the_lattice_piece_selects_the_leaf_rule(monkeypatch):
     seen = []
     real = G._count_leaves
 
-    def spy(geometry, u0, v0, side, strict):
+    def spy(geometry, u0, v0, side, strict, shift):
         seen.append(strict)
-        return real(geometry, u0, v0, side, strict)
+        return real(geometry, u0, v0, side, strict, shift)
 
     monkeypatch.setattr(G, "_count_leaves", spy)
     bases = [(737 - 260, 260)]  # (column, row) with column + row = 737
-    G._count_ordinary(_invalid_pieces()["spike_to_centre"], bases, 3, 1)
+    G._count_ordinary(_invalid_pieces()["spike_to_centre"], bases, 3, 1, SHIFT)
     assert seen and all(seen)
     seen.clear()
     G._count_ordinary(
-        box(737 * L1 + 10, 260 * L1 + 10, 737 * L1 + 9000, 260 * L1 + 7000), bases, 3, 1
+        box(737 * L1 + 10, 260 * L1 + 10, 737 * L1 + 9000, 260 * L1 + 7000),
+        bases,
+        3,
+        1,
+        SHIFT,
     )
     assert seen and not any(seen)
 

@@ -50,12 +50,18 @@ of an absorber and 51.6779 per cent of a triangle. **Both figures are
 readings of that step rather than properties of the grid**: refined, they
 settle near 33.03 and 51.57 per cent, and the declared readings and the
 settled ones are pinned together, so neither can be read as the other. Handed
-such an outline, :func:`~itacart.polyfill` under ``center`` raises rather than
-answering an empty cover, because the figure that comes back holds no cell
-centre; under ``intersects`` the cell is in the answer along with others the
-outline touches; :func:`recover_from_geojson` returns the cell. An ordinary
-cell loses less than a thousandth of its figure on the same route, so the
-refusal belongs to this row and not to the route.
+such an outline, :func:`~itacart.polyfill` under ``center`` never answers the
+cell. For four of the six it raises rather than answering an empty cover,
+because the figure that comes back holds no cell centre. For the two absorbers
+of the eastern quadrants it answers the cap of their own hemisphere: every
+absorber of the row comes back with an edge along the meridian, the cap's
+centroid lies exactly on that edge, and the centre rule moves a centre on an
+outline a micrometre east before testing it, which puts that centroid inside
+the two eastern figures and outside the two western ones. Under
+``intersects`` the cell is in the answer along with others the outline
+touches; :func:`recover_from_geojson` returns the cell. An ordinary cell loses
+less than a thousandth of its figure on the same route, so the loss belongs to
+this row and not to the route.
 """
 
 from __future__ import annotations

@@ -102,7 +102,9 @@ def _fill_from_the_grid(cell: str, resolution: int, containment: str) -> set[str
     """
     from itacart import geometry as gm
 
-    def prepared(_geometry: object, _resolution: int, densify: bool = True) -> object:
+    def prepared(
+        _geometry: object, _resolution: int, densify: bool = True, *, snap: bool
+    ) -> object:
         plane = Polygon(boundary.plane_ring(cell)[1])
         views = [
             (quadrant, gm._LatticeView(gm._to_lattice(piece, quadrant)))

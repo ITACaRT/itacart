@@ -858,13 +858,14 @@ def test_count_stack_depth_is_the_resolution_difference(
         level: int,
         target: int,
         strict: bool,
+        shift: tuple[float, float],
     ) -> int:
         levels.append(level)
         depth[0] += 1
         depth[1] = max(depth[1], depth[0])
         try:
             return original(  # type: ignore[arg-type]
-                lattice, u0, v0, side, level, target, strict
+                lattice, u0, v0, side, level, target, strict, shift
             )
         finally:
             depth[0] -= 1
@@ -2256,7 +2257,7 @@ def test_the_meridian_walk_reaches_the_polar_row_and_stops_there() -> None:
     among the cells it names.
     """
     region = Polygon([(-0.2, 89.0), (0.2, 89.0), (0.2, 90.0), (-0.2, 90.0)])
-    plane, _views = geometry._prepare(region, 1, densify=True)
+    plane, _views = geometry._prepare(region, 1, densify=True, snap=True)
     rows = geometry._meridian_rows(plane)
     assert rows
     side = itacart.cell_size(1)
@@ -2651,7 +2652,9 @@ def test_the_descent_recovers_the_real_tree_from_the_grids_own_geometry(
     monkeypatch.setattr(
         geometry,
         "_prepare",
-        lambda _geometry, _resolution, densify=True: _prepared_from_the_grid(cell),
+        lambda _geometry, _resolution, densify=True, *, snap: _prepared_from_the_grid(
+            cell
+        ),
     )
     ignored = Polygon([(0.0, 0.0), (0.1, 0.0), (0.1, 0.1)])
 
@@ -2809,7 +2812,7 @@ def test_contains_keeps_a_cap_cell_exactly_when_its_ring_lies_inside() -> None:
     seen answering both ways, and the three modes still nest.
     """
     resolution = 5
-    plane, _ = geometry._prepare(CAP_BAND, resolution, densify=True)
+    plane, _ = geometry._prepare(CAP_BAND, resolution, densify=True, snap=False)
     kept = set(itacart.decompose(itacart.polyfill(CAP_BAND, resolution, "contains")))
     centre = set(itacart.decompose(itacart.polyfill(CAP_BAND, resolution)))
     touched = set(
@@ -2970,7 +2973,7 @@ def test_the_meridian_walk_is_offered_no_row_past_the_pole() -> None:
         assert all(
             itacart.last_lattice_column(quadrant, r, side) >= first for r in rows
         )
-    plane, _ = geometry._prepare(CAP_BAND, 5, densify=True)
+    plane, _ = geometry._prepare(CAP_BAND, 5, densify=True, snap=True)
     assert geometry._meridian_rows(plane) == [("N", geometry._POLAR_ROW)]
 
 

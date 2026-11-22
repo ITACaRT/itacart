@@ -3,6 +3,130 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [SemVer](https://semver.org/).
 
+## [1.2.1] - 2026-11-21
+
+A correction to the rule that keeps a cell by its centre. Since 1.0.0 a centre
+lying exactly on the outline was kept by no region, and which centres lay
+exactly on it depended on the platform. Counts and fills change where that
+happened, which for a polygon drawn through cell centroids is all along its
+outline, and the vertices of such a polygon are now read alike on every
+platform. No name, parameter or type changes.
+
+### Fixed
+
+- **A centre on the outline is kept by exactly one side of it.** Under
+  `center` -- the default of `polyfill` and the rule of
+  `count_internal_cells` -- a cell is kept when its centre lies inside the
+  geometry, and a centre exactly on the outline is not inside. Such a centre
+  was dropped by the polygon and by its neighbour across a shared edge. The
+  centre is now tested one micrometre east and ten nanometres north of where
+  it lies, on the sinusoidal plane, so that a centre on an edge falls on one
+  side of it: west and south edges keep the centres on them, east and north
+  edges do not. With it, three defects go:
+  - the count depended on the platform. Whether a centre landed exactly on
+    the line, or a unit in the last place to either side of it, was decided
+    by the C library that computed the projection, and two machines could
+    give two counts for one polygon. For a polygon drawn through cell
+    centroids the decision is now the lattice's: the count is the exact count
+    of lattice points under the same half-open rule, except in the two cases
+    under Known limitations that are the same on every machine, and the
+    vertices are read alike everywhere (next item);
+  - the count was biased low. Of the lattice points on the outline of such a
+    polygon, about half were lost: a square of 1 000 by 1 000 resolution-13
+    cells counted 998 001, its interior, where it now counts 1 000 000;
+  - counts did not add up. A polygon cut in two along a row of centres lost
+    every centre on the cut, 29 999 of them for a circle of 706 758 480 cells,
+    and the prime-meridian triangles and the polar caps, whose centroids lie
+    on the meridian, were dropped by both sides of an outline running along
+    it. The parts now add up to the whole, in the count and in the fill.
+
+  **The counts and fills of a polygon with its vertices at cell centres
+  change wherever a centre lies on its outline**, and `polyfill` under
+  `center` changes with the count, as the two must agree: the index and the
+  TreeBlob of such a fill change, and the GeometryBlob of its vertices does
+  not. Elsewhere the shift changes the decision only for a centre within about
+  a micrometre of the outline, a limitation below. The twenty counts
+  frozen from release 1.1.0 are unchanged. Against release 1.2.0, on one Linux
+  machine, the count of one of 160 random polygons at resolutions 6 to 10
+  moved, by one cell, and none of their fills at resolutions up to 7; at
+  resolution 13, where a cell is a centimetre wide, the count of 34 of 39
+  random polygons moved, by at most six cells in counts of up to two billion.
+- **A vertex drawn on the lattice is read as drawn, on every machine.** The
+  vertices reach the plane through the projection, whose last bits differ
+  between C libraries by a few nanometres, and the shift puts some centres
+  that close to an edge. Under `center`, in the count and in the fill, a
+  projected vertex within a micrometre, in each coordinate, of a point of the
+  five-millimetre plane grid -- which holds every corner and every centre of
+  an ordinary cell, at every resolution -- is now moved onto that point, and
+  one within a micrometre of a prime-meridian triangle's centroid onto that
+  centroid, before anything is tested. The move uses only division, rounding,
+  multiplication and addition, so the moved vertex is the same number on every
+  machine. A corner or centroid this package returns in degrees projects back
+  at most 7.5 nanometres from its point. The centroids of border-absorbing
+  cells and polar caps are not moved, nor is any vertex farther than the
+  micrometre, which a lattice vertex written with eleven decimals of a degree
+  or fewer can be; twelve keep every one within it. A polygon the move makes
+  invalid is refused, as any invalid polygon is; one the projection had
+  already made invalid on the plane, such as the union of the cells of the
+  paper's Figure 7(a), is not refused, as it was not before. `intersects` and
+  `contains` read the vertices as projected, as before.
+- Handed the reingested outline of one of the two cells of row 999 that
+  absorb the border in the eastern quadrants, `NE(0001/0999)` and
+  `SE(0001/0999)`, `polyfill` under `center` now answers the cap of their own
+  hemisphere instead of raising: the outline's edge along the meridian runs
+  through the cap's centroid, and the shift sends that centroid east, into
+  the figure. The other four cells of the row still raise. The `interop`
+  module and the page on geographic and grid geometry say so, and the page no
+  longer shows a figure of a border screen the package no longer has.
+
+### Known limitations
+
+Stated in `count_internal_cells`, summarised in `polyfill`, and pinned by named
+tests: by number where the number is the same on every machine, by existence
+where it is not.
+
+Where the rule departs from the exact count of centres, **alike on every
+machine** -- given vertices on the lattice and no edge densified:
+
+- **An edge along the shift.** The shift points 1:100 north of east on the
+  plane, and a centre on an edge running that way stays on it after the
+  shift; its side is settled by the rounding of the shifted point, not by the
+  rule. At 22 degrees of latitude, in three quadrants, on edges carrying nine
+  lattice points between their ends, the count departed from the exact one by
+  up to ten cells for edges within 0.053 degrees of that direction, and by
+  none from 0.06 degrees on.
+- **A centre nearer an edge than the shift.** A centre not on the outline but
+  nearer to it than the shift's component across the edge, at most a
+  micrometre, changes side, tie or not; one exactly that far lands on the edge,
+  a near tie the arithmetic decides. On a polygon drawn through cell centroids
+  that takes an edge whose direction on the lattice has no short step: edges of
+  130 to 500 m with no common factor in their steps moved the count by up to
+  four cells each, and edges up to 80 m by none. On any other polygon it is all
+  the shift changes.
+
+What **still depends on the machine** -- points the vertex move does not reach:
+
+- **An edge the fill or the count densifies.** A polygon arrives in longitude
+  and latitude, and an edge at least as long as the densification threshold --
+  505.1 m at resolution 13, one kilometre at the others -- is read as a
+  geodesic and gains points that are not on the lattice; near them the
+  decision is the platform's again. A polygon whose edges are straight on the
+  plane is counted as drawn only while every edge stays below the threshold,
+  with a margin, because the length is computed with the C library too. On a
+  square of 20 km at resolution 13, with the C library's results moved by a
+  unit in the last place to stand for four other platforms, a vertex every
+  400 m kept the count exact on all four, and the corners alone let it move by
+  one cell on three.
+- **A vertex not on the lattice.** A vertex the move does not reach is where
+  the projection puts it, give or take the last bits, and a centre landing
+  within a few nanometres of an edge through it is decided by them. Nothing
+  makes that systematic, as a tie does; at resolution 13 a centre lies within
+  a nanometre of an edge, on average, once in fifty kilometres of outline, and
+  of 39 random polygons of 100 to 400 m, with their coordinates moved by a
+  unit in the last place to stand for six other platforms, two moved by one
+  cell. The centroids of border-absorbing cells and polar caps are vertices of
+  this kind.
+
 ## [1.2.0] - 2026-11-17
 
 The count asks a whole level of its descent at a time. The counts are the ones

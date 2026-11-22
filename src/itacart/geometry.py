@@ -139,6 +139,131 @@ folds, and recovers the quadrant afterwards; recovering it afterwards is
 what makes a cross-quadrant geometry impossible to fill.
 """
 
+_TIE_EAST: Final[float] = 1.0e-6
+"""East part of the shift the centre rule applies, in metres on the plane.
+
+A cell is kept under ``center`` when its centre lies inside the geometry,
+and ``contains`` is false on the outline. Until this shift a centre lying
+exactly on the outline was kept by nothing: not by the geometry it
+bounds, and not by either of two regions sharing the edge. That is the
+rule rather than the exception for a polygon drawn through cell
+centroids, whose vertices and every lattice point along its edges are
+centres -- a square of 1 000 by 1 000 resolution-13 cells counted
+998 001, its interior -- and whether a given centre landed exactly on
+the line, or one unit in the last place to either side of it, was
+decided by the last bits of the projection, which are not the same on
+every C library.
+
+So the point tested is the centre moved this far east and
+:data:`_TIE_NORTH` north, on the parallels plane. A centre on an edge
+then lies on one side of it, and of two regions sharing the edge exactly
+one keeps it: west and south edges keep the centres lying on them, east
+and north edges do not, and a count is additive across the edge.
+
+One micrometre is a ten-thousandth of the side of a resolution-13 cell,
+so a centre farther from the outline than that never changes side; and
+it is over two hundred units in the last place of any lattice
+coordinate, so it is not lost in the rounding of the centre it is added
+to. :func:`_tie_shift` carries it into the frame each decision is taken
+in. The vertices' own last bits are a separate matter, settled by moving
+them onto the lattice first (:data:`_SNAP_STEP`). What neither settles
+is stated in :func:`count_internal_cells`.
+"""
+
+_TIE_NORTH: Final[float] = 1.0e-8
+"""North part of the same shift, in metres on the plane: a hundredth of the east.
+
+The east part decides every edge but the ones running east and west,
+which it slides along; this part decides those, and is small so that it
+decides nothing else. The shift therefore points 1:100 north of east,
+and an edge running that way is the one it cannot decide.
+
+Ten nanometres is 21 units in the last place of the ordinate at 22
+degrees south, where a vertex drawn through a cell centroid was measured
+between 1 below and 2 above the line it belongs to, on one Linux
+machine. Near the pole, where the ordinate approaches ten thousand
+kilometres, it is 5 units, and nothing was measured there.
+"""
+
+
+def _tie_shift(quadrant: str | None) -> tuple[float, float]:
+    """The centre rule's shift, in the frame a centre is tested in.
+
+    ``None`` is the unsplit plane, where the prime-meridian triangles and
+    the polar caps are decided, and the shift is
+    ``(_TIE_EAST, _TIE_NORTH)`` as it stands. A quadrant name is that
+    quadrant's sheared lattice, and the shift goes through the matrix the
+    geometry went through, :data:`_QUADRANT_SHEAR`, so that it is the same
+    displacement on the plane in all four: ``(a*east + b*north,
+    d*east + e*north)``. On the lattice that runs 1:101 off the ``u``
+    axis in the north-east and south-west quadrants and 1:99 in the other
+    two, because the shear adds the north part to ``u`` in the first pair
+    and takes it away in the second.
+
+    Read from the two constants when asked for, not frozen at import,
+    and handed to worker processes with the rest of their work, so that a
+    worker decides exactly as the process that started it.
+    """
+    if quadrant is None:
+        return (_TIE_EAST, _TIE_NORTH)
+    a, b, d, e = _QUADRANT_SHEAR[quadrant]
+    return (a * _TIE_EAST + b * _TIE_NORTH, d * _TIE_EAST + e * _TIE_NORTH)
+
+
+_SNAP_STEP: Final[float] = 0.005
+"""Step of the plane grid a projected vertex is moved onto, in metres.
+
+The shift settles a centre lying on the outline only if the outline is
+where it was drawn. A polygon drawn through cell centroids reaches the
+plane through the projection, whose last bits are not the same on every
+C library: a vertex a few nanometres to one side of its centroid on one
+machine is a few nanometres to the other side on another. The shift
+puts some centres that close to an edge -- it moves every centre, and a
+centre the shift's own size from an edge lands on it -- and those change
+side with the vertex. So before anything is tested, under ``center``, a
+vertex within :data:`_SNAP_TOLERANCE` of a point of this grid is moved
+onto it, with a division, a rounding to a whole number and a product,
+which IEEE 754 answers alike on every machine (:func:`_snap_vertex`).
+
+Five millimetres is the grid that holds every corner and every centre
+of an ordinary cell, at every resolution and in every quadrant. A side
+is a whole number of centimetres at every resolution, so on the lattice
+a corner lies a whole number of sides from the origin and a centre half
+a side more; and the shear of :data:`_QUADRANT_SHEAR` is a matrix of
+whole numbers whose inverse is one too, so multiples of five millimetres
+on the lattice are multiples of five millimetres on the plane. The centres of
+resolution 13 alone would not do: a resolution-9 centre lies five
+millimetres from the nearest of them, and a polygon drawn through
+resolution-9 centroids would be left out.
+"""
+
+_SNAP_TOLERANCE: Final[float] = 1.0e-6
+"""How far from a point of the grid a vertex may lie and still be moved onto it.
+
+In metres, in each coordinate. The same micrometre the cell layer clips
+with. A corner or a centroid this package returns in degrees, projected
+back, was measured at most 7.5 nanometres from its grid point -- every
+resolution, both hemispheres, longitudes up to the domain border and
+latitudes to 89.99 degrees, on one Linux machine -- and the tolerance is
+over a hundred times that. It is a five-thousandth of the step, so a
+vertex not drawn on the grid is moved only if it falls within it by
+chance, about one vertex in six million, and then by at most 1.4
+micrometres.
+
+A lattice vertex written in degrees with eleven decimals or fewer is not
+always within it. Rounding the latitude moves the abscissa too, in
+proportion to the longitude, and eleven decimals left a vertex 1.6
+micrometres off its point near the antemeridian, ten decimals 17; such a
+vertex is not moved. Twelve decimals keep every lattice vertex within
+the tolerance, and a float written out in full has more.
+"""
+
+_MERIDIAN_SIDES: Final[tuple[float, ...]] = tuple(
+    cell_size(resolution) for resolution in range(MAX_RESOLUTION, 0, -1)
+)
+"""The side of every resolution, finest first, for the meridian centroids."""
+
+
 _PLANE_LIMIT: float = 4.0e7
 """Half-width of the clipping box, in metres: past any plane coordinate."""
 
@@ -445,6 +570,112 @@ def _project(geometry: "BaseGeometry") -> "BaseGeometry":
         f"cannot fill a {geometry.geom_type}; supported types are Point, "
         "LineString, Polygon and MultiPolygon"
     )
+
+
+def _snap_vertex(x: float, y: float) -> tuple[float, float]:
+    """A projected vertex, moved onto the lattice point it was drawn on.
+
+    Two kinds of point are recognised. The first is a point of the
+    :data:`_SNAP_STEP` grid, which holds every corner and every centre of
+    an ordinary cell. The second is the centroid of a prime-meridian
+    triangle, which lies on the meridian a third of a side above the
+    triangle's base and is never on the grid: no side is a multiple of
+    three half-centimetres, so a third of one never ends on a grid point,
+    and the nearest grid point is 1.7 millimetres away or more. It is
+    found by its own formula, ``(0, k*side + side/3)`` for a whole ``k``
+    at some resolution, signed by the hemisphere -- the point
+    :func:`_meridian_centre` shifts.
+
+    Each coordinate must lie within :data:`_SNAP_TOLERANCE` of the
+    point. Only division, rounding to a whole number, multiplication and
+    addition are used, and IEEE 754 rounds each of them one way, so a
+    vertex within the tolerance lands on the same number on every
+    machine, whatever the projection's last bits were.
+
+    Nothing else is looked for. The centroid of a cell that absorbs the
+    domain border, or of a polar cap, is computed from the cell's ring by
+    the geometry engine when the fill tests it, and follows no formula
+    this function could share. Such a centroid, like any vertex not drawn
+    on the lattice, is returned as it is unless it happens to lie that
+    close to a grid point, which neither cap's centroid does.
+    """
+    grid_x = round(x / _SNAP_STEP) * _SNAP_STEP
+    grid_y = round(y / _SNAP_STEP) * _SNAP_STEP
+    if abs(x - grid_x) <= _SNAP_TOLERANCE and abs(y - grid_y) <= _SNAP_TOLERANCE:
+        return grid_x, grid_y
+    if abs(x) <= _SNAP_TOLERANCE:
+        height = abs(y)
+        for side in _MERIDIAN_SIDES:
+            row = round((height - side / 3.0) / side)
+            centroid = row * side + side / 3.0
+            if row >= 0 and abs(height - centroid) <= _SNAP_TOLERANCE:
+                return 0.0, math.copysign(centroid, y)
+    return x, y
+
+
+def _snap_to_grid(plane: "BaseGeometry") -> "BaseGeometry":
+    """A projected geometry with its lattice vertices moved onto the lattice.
+
+    The step the ``center`` rule takes between the projection and the
+    split, through :func:`_prepare`, so that the count and the fill read
+    the same vertices. Each vertex goes through :func:`_snap_vertex` and
+    moves by at most :data:`_SNAP_TOLERANCE` in each coordinate; what it
+    settles and what it leaves to the platform is stated in
+    :func:`count_internal_cells`.
+
+    Two vertices a micrometre apart about one grid point become one
+    point, and a vertex a micrometre from an edge can land on it, so the
+    moved figure can stop being valid. It is then refused, with the error
+    :func:`_refuse_invalid_area` raises and for the same reason: nothing
+    is repaired, because a repair would decide which area was meant.
+
+    Only a figure the move made invalid is refused. One the projection had
+    already made invalid is not, as it was not before the move existed,
+    and is read with its vertices moved like any other: the validity
+    screen asks about the geometry the caller wrote, in degrees, and the
+    projection alone can break it by nanometres. The union of the
+    cells of the paper's Figure 7(a) is one: valid in degrees, one of its
+    rings crosses itself on the plane where two of its cells meet at a
+    corner, and after the move touches itself there instead.
+    """
+    from shapely.geometry import LineString, MultiPolygon, Point, Polygon
+
+    moved = False
+
+    def snapped(coords: Sequence[tuple[float, float]]) -> list[tuple[float, float]]:
+        nonlocal moved
+        out: list[tuple[float, float]] = []
+        for x, y in coords:
+            point = _snap_vertex(x, y)
+            moved = moved or point != (x, y)
+            out.append(point)
+        return out
+
+    def rebuilt(geometry: Any) -> Any:
+        if isinstance(geometry, Point):
+            return Point(snapped([(geometry.x, geometry.y)])[0])
+        if isinstance(geometry, LineString):
+            return LineString(snapped(geometry.coords))
+        if isinstance(geometry, Polygon):
+            return Polygon(
+                snapped(geometry.exterior.coords),
+                [snapped(hole.coords) for hole in geometry.interiors],
+            )
+        return MultiPolygon([rebuilt(part) for part in geometry.geoms])
+
+    result = rebuilt(plane)
+    areal = result.geom_type in {"Polygon", "MultiPolygon"}
+    if moved and areal and not result.is_valid and plane.is_valid:
+        from shapely.validation import explain_validity
+
+        raise GeometryError(
+            f"the {result.geom_type} is not a valid geometry once its "
+            f"vertices are moved onto the lattice ({explain_validity(result)}); "
+            "a vertex within a micrometre of a lattice point is read as that "
+            "point, and an invalid areal geometry is refused rather than "
+            "repaired, because a repair would decide which area was meant"
+        )
+    return result
 
 
 def _quadrant_pieces(plane: "BaseGeometry") -> list[tuple[str, "BaseGeometry"]]:
@@ -812,6 +1043,7 @@ def _accept_leaf(
     u0: float,
     v0: float,
     side: float,
+    shift: tuple[float, float],
 ) -> bool:
     """Whether a target-resolution square is kept, given how it was reached.
 
@@ -828,6 +1060,13 @@ def _accept_leaf(
     touching, and therefore ``contains`` is a subset of ``center`` is a
     subset of ``intersects`` by construction, for every square the
     descent visits.
+
+    The point asked about is the centre moved by ``shift``, the
+    tie-breaking shift of this square's frame (:func:`_tie_shift`). It
+    moves the centre by about a micrometre, and the smallest square is a
+    centimetre wide, so the point stays inside the square and the chain
+    holds as before. It is ``u0 + side / 2.0 + du``, evaluated in that
+    order, which is the expression :func:`_count_leaves` evaluates.
     """
     from shapely.geometry import Point
 
@@ -835,7 +1074,8 @@ def _accept_leaf(
         return False
     if containment == "intersects":
         return True
-    return bool(prepared.contains(Point(u0 + side / 2.0, v0 + side / 2.0)))
+    du, dv = shift
+    return bool(prepared.contains(Point(u0 + side / 2.0 + du, v0 + side / 2.0 + dv)))
 
 
 @lru_cache(maxsize=None)
@@ -901,6 +1141,7 @@ def _fill_node(
     code: str,
     compact: bool,
     budget: _Budget,
+    shift: tuple[float, float],
 ) -> str | None:
     """Walk one node and return its index fragment, or ``None`` if empty.
 
@@ -919,6 +1160,9 @@ def _fill_node(
     emitted as itself when compacting and with a shared expansion
     otherwise. Straddling: subdivide, or apply the leaf predicate if
     this is already the target.
+
+    ``shift`` is the centre rule's tie-breaking shift in this lattice's
+    frame (:func:`_tie_shift`), handed down unchanged to the leaves.
     """
     from shapely.geometry import box
 
@@ -932,7 +1176,7 @@ def _fill_node(
         budget.charge(_leaves_between(level, target))
         return code + _expansion(level, target)
     if level == target:
-        if _accept_leaf(prepared, containment, u0, v0, side):
+        if _accept_leaf(prepared, containment, u0, v0, side, shift):
             budget.charge(1)
             return code
         return None
@@ -953,6 +1197,7 @@ def _fill_node(
                 _child_code(row, column, step),
                 compact,
                 budget,
+                shift,
             )
             if fragment is not None:
                 parts.append(fragment)
@@ -1004,13 +1249,20 @@ class _BorderWalk:
     resolution 5, so a counting pass would evict what the fill is about
     to ask for and the tree would be paid for twice. This holds it for
     the length of one call and both passes read it.
+
+    It also holds the centre rule's tie-breaking shift for the frame the
+    walk asks its questions in: the quadrant's lattice when sheared, the
+    unsplit plane when not (:func:`_tie_shift`). Every leaf under the
+    walk is decided with it, inside the family and on the branches that
+    leave it.
     """
 
-    __slots__ = ("_children", "_rings", "quadrant", "sheared")
+    __slots__ = ("_children", "_rings", "quadrant", "sheared", "shift")
 
     def __init__(self, quadrant: str, sheared: bool = True) -> None:
         self.quadrant = quadrant
         self.sheared = sheared
+        self.shift = _tie_shift(quadrant if sheared else None)
         self._children: dict[str, tuple[str, ...]] = {}
         self._rings: dict[str, "BaseGeometry | None"] = {}
 
@@ -1072,7 +1324,10 @@ class _BorderWalk:
 
 
 def _accept_border_leaf(
-    prepared: "PreparedGeometry", containment: Containment, shape: "BaseGeometry"
+    prepared: "PreparedGeometry",
+    containment: Containment,
+    shape: "BaseGeometry",
+    shift: tuple[float, float],
 ) -> bool:
     """Whether an absorbing target-resolution cell is kept.
 
@@ -1085,12 +1340,22 @@ def _accept_border_leaf(
     they are not: a child of an absorbing cell reaches past its parent
     by up to 2.411 per cent of its own area under the chord
     representation, so nothing may be inferred from the parent.
+
+    Under ``center`` the point asked about is the centroid of the
+    effective ring moved by ``shift``, the walk's tie-breaking shift
+    (:func:`_tie_shift`). The cap's centroid lies on the meridian, ``x``
+    a signed zero, so it is exactly on any outline that follows the
+    meridian; the shift sends it east.
     """
+    from shapely.geometry import Point
+
     if containment == "intersects":
         return True
     if containment == "contains":
         return bool(prepared.contains(shape))
-    return bool(prepared.contains(shape.centroid))
+    centre = shape.centroid
+    du, dv = shift
+    return bool(prepared.contains(Point(centre.x + du, centre.y + dv)))
 
 
 def _count_border_node(
@@ -1126,7 +1391,7 @@ def _count_border_node(
     if shape is None or not prepared.intersects(shape):
         return 0
     if level == target:
-        return 1 if _accept_border_leaf(prepared, containment, shape) else 0
+        return 1 if _accept_border_leaf(prepared, containment, shape, walk.shift) else 0
     total = 0
     for child in walk.children(cell):
         if absorbs_border(child) or not walk.sheared:
@@ -1146,7 +1411,9 @@ def _count_border_node(
             )
         else:
             u0, v0, side = walk.square(child, level + 1)
-            total += _count_node(prepared, u0, v0, side, level + 1, target, containment)
+            total += _count_node(
+                prepared, u0, v0, side, level + 1, target, walk.shift, containment
+            )
         if remaining is not None and total > remaining:
             return total
     return total
@@ -1179,7 +1446,8 @@ def _fill_border_node(
     if shape is None or not prepared.intersects(shape):
         return []
     if level == target:
-        return [cell] if _accept_border_leaf(prepared, containment, shape) else []
+        kept_here = _accept_border_leaf(prepared, containment, shape, walk.shift)
+        return [cell] if kept_here else []
     kept: list[str] = []
     for child in walk.children(cell):
         if absorbs_border(child) or not walk.sheared:
@@ -1190,7 +1458,15 @@ def _fill_border_node(
             u0, v0, side = walk.square(child, level + 1)
             kept.extend(
                 _fill_ordinary_atoms(
-                    prepared, u0, v0, side, level + 1, target, containment, child
+                    prepared,
+                    u0,
+                    v0,
+                    side,
+                    level + 1,
+                    target,
+                    containment,
+                    child,
+                    walk.shift,
                 )
             )
     return kept
@@ -1253,6 +1529,7 @@ def _fill_ordinary_atoms(
     target: int,
     containment: Containment,
     cell: str,
+    shift: tuple[float, float],
 ) -> list[str]:
     """The closed-form descent, resumed once a branch leaves the family.
 
@@ -1260,7 +1537,9 @@ def _fill_ordinary_atoms(
     collecting cells across roots that do not share a stem. The walk
     itself is the ordinary one: a square, its ``d x d`` children, and
     the wholly-inside shortcut, which is sound again here because a
-    square's descendants are subsets of it.
+    square's descendants are subsets of it. ``shift`` is the walk's
+    tie-breaking shift, the same one the family's own leaves are decided
+    with.
     """
     from shapely.geometry import box
 
@@ -1269,7 +1548,7 @@ def _fill_ordinary_atoms(
         return []
     if level == target:
         if prepared.contains(square) or _accept_leaf(
-            prepared, containment, u0, v0, side
+            prepared, containment, u0, v0, side, shift
         ):
             return [cell]
         return []
@@ -1289,6 +1568,7 @@ def _fill_ordinary_atoms(
                     target,
                     containment,
                     _descend_spelling(cell, _child_code(row, column, step)),
+                    shift,
                 )
             )
     return out
@@ -1320,16 +1600,26 @@ def _meridian_triangle(base: float, y_sign: float, side: float) -> "BaseGeometry
 
 
 def _meridian_centre(base: float, y_sign: float, side: float) -> "BaseGeometry":
-    """Centroid of that triangle, which always lies on the meridian.
+    """The point ``center`` tests for that triangle: its centroid, shifted.
 
-    ``x`` is zero for every triangle at every resolution, so under
-    ``center`` the point falls on the line the quadrant windows cut
-    along. Tested against the geometry **before** the split, where the
-    line is interior and the answer is one rather than two.
+    The centroid always lies on the meridian: ``x`` is zero for every
+    triangle at every resolution, so the point falls on the line the
+    quadrant windows cut along. Tested against the geometry **before**
+    the split, where the line is interior and the answer is one rather
+    than two.
+
+    The line is interior to the quadrant split, not to every geometry.
+    An outline that runs along the meridian passes through every one of
+    these centroids, which used to leave each of them outside on both
+    sides of it. The centroid is therefore moved by the tie-breaking
+    shift of the unsplit plane, ``_tie_shift(None)``, and the region east
+    of such an outline keeps the triangle while the region west of it
+    does not.
     """
     from shapely.geometry import Point
 
-    return Point(0.0, y_sign * (base + side / 3.0))
+    du, dv = _tie_shift(None)
+    return Point(0.0 + du, y_sign * (base + side / 3.0) + dv)
 
 
 def _accept_meridian_leaf(
@@ -1342,8 +1632,10 @@ def _accept_meridian_leaf(
     """Whether a target-resolution triangle is kept, given how it was reached.
 
     The counterpart of :func:`_accept_leaf`, and the chain nests for the
-    same reason: the centroid is a point of the triangle, so wholly
-    inside implies centre inside implies touching.
+    same reason: the shifted centroid (:func:`_meridian_centre`) is still
+    a point of the triangle, a micrometre from the centroid in a triangle
+    a centimetre tall at the finest resolution, so wholly inside implies
+    centre inside implies touching.
     """
     if containment == "contains":
         return False
@@ -1432,7 +1724,8 @@ def _fill_meridian_node(
                     budget,
                 )
             else:
-                view = lattices.get(hemisphere + ("E" if offset > 0 else "W"))
+                side_quadrant = hemisphere + ("E" if offset > 0 else "W")
+                view = lattices.get(side_quadrant)
                 if view is None:
                     continue
                 fragment = _fill_node(
@@ -1446,6 +1739,7 @@ def _fill_meridian_node(
                     text,
                     compact,
                     budget,
+                    _tie_shift(side_quadrant),
                 )
             if fragment is not None:
                 parts.append(fragment)
@@ -1502,7 +1796,8 @@ def _count_meridian_node(
                     target,
                 )
                 continue
-            view = lattices.get(hemisphere + ("E" if offset > 0 else "W"))
+            side_quadrant = hemisphere + ("E" if offset > 0 else "W")
+            view = lattices.get(side_quadrant)
             if view is None:
                 continue
             total += _count_node(
@@ -1512,6 +1807,7 @@ def _count_meridian_node(
                 sub,
                 step,
                 target,
+                _tie_shift(side_quadrant),
             )
     return total
 
@@ -1569,6 +1865,7 @@ def _count_node(
     side: float,
     level: int,
     target: int,
+    shift: tuple[float, float],
     containment: Containment = "center",
 ) -> int:
     """Accumulate the cell count under one node without naming any cell.
@@ -1583,6 +1880,10 @@ def _count_node(
     difference and therefore at most twelve. Nothing accumulates per
     cell, which is what lets the count run at resolution 13 where naming
     the cells could not.
+
+    ``shift`` is the centre rule's tie-breaking shift in this lattice's
+    frame (:func:`_tie_shift`). It has no default: a caller that forgot it
+    would decide every tie by the rule it replaced, and nothing would say so.
     """
     from shapely.geometry import box
 
@@ -1592,7 +1893,7 @@ def _count_node(
     if prepared.contains(square):
         return _leaves_between(level, target)
     if level == target:
-        return 1 if _accept_leaf(prepared, containment, u0, v0, side) else 0
+        return 1 if _accept_leaf(prepared, containment, u0, v0, side, shift) else 0
     step = level + 1
     divisor = linear_refinement_ratio(step)
     child = side / divisor
@@ -1606,13 +1907,14 @@ def _count_node(
                 child,
                 step,
                 target,
+                shift,
                 containment,
             )
     return total
 
 
 def _prepare(
-    geometry: "BaseGeometry", resolution: int, densify: bool
+    geometry: "BaseGeometry", resolution: int, densify: bool, *, snap: bool
 ) -> tuple["BaseGeometry", list[tuple[str, "_LatticeView"]]]:
     """Screen, densify, project and shear a geometry, one part per quadrant.
 
@@ -1621,6 +1923,14 @@ def _prepare(
     plane is not a convenience: a prime-meridian triangle straddles the
     cut, so the only figure that can answer a containment question about
     it is the one that has not been cut.
+
+    ``snap`` moves the vertices drawn on the lattice onto it
+    (:func:`_snap_to_grid`), after the projection and therefore after
+    densification, so that both the plane and the quadrant parts carry
+    the moved vertices. The ``center`` rule asks for it, in the count and
+    in the fill alike. ``intersects`` and ``contains`` do not, and read
+    the vertices where the projection put them. No default: each caller
+    states which reading it takes.
     """
 
     if geometry.is_empty:
@@ -1643,6 +1953,8 @@ def _prepare(
         geometry = _densify_any(geometry, _auto_segment(resolution))
     geometry = _lift_extensions(geometry)
     plane = _project(geometry)
+    if snap:
+        plane = _snap_to_grid(plane)
     out: list[tuple[str, "_LatticeView"]] = []
     for quadrant, piece in _quadrant_pieces(plane):
         out.append((quadrant, _LatticeView(_to_lattice(piece, quadrant))))
@@ -1701,13 +2013,49 @@ def polyfill(
     keeps every cell touching the geometry, and ``contains`` keeps only
     cells wholly inside. The three nest, ``contains`` inside ``center``
     inside ``intersects``, and they nest by construction rather than by
-    coincidence: see :func:`_accept_leaf`.
+    coincidence: see :func:`_accept_leaf`, and **The vertices drawn on
+    the lattice** below for the one step ``center`` takes alone.
 
     **The centre, not the anchor.** A cell's anchor is a vertex and lies
     on its own border, so an anchor test would award a cell by a point it
     shares with three neighbours, and ``contains`` would stop being a
     subset of ``center`` for every cell whose anchor sits on the outline.
     The centre is interior to the cell and has neither problem.
+
+    **A centre on the outline.** The centre is tested one micrometre east
+    and ten nanometres north of where it lies, on the sinusoidal plane.
+    A centre exactly on the outline then falls on one side of it, and of
+    two geometries sharing an edge exactly one keeps the cell: west and
+    south edges keep the centres on them, east and north edges do not.
+    Without the shift such a centre was kept by neither, and whether a
+    centre landed exactly on the line was decided by the last bits of the
+    projection, which differ between platforms. It is the common case for
+    a polygon drawn through cell centroids, whose every vertex is a
+    centre.
+
+    **The vertices drawn on the lattice.** Under ``center``, and only
+    there, a projected vertex within a micrometre of a corner or centre
+    of an ordinary cell -- a point of the five-millimetre plane grid --
+    or of a prime-meridian triangle's centroid is moved onto it before
+    anything is tested, so that such a polygon is read with the same
+    numbers on every platform. A polygon the move makes invalid is
+    refused. ``intersects`` and ``contains`` read the vertices as
+    projected; the three still nest, because the move is at most 1.4
+    micrometres and no cell's centre lies that close to its own border.
+
+    What the rule leaves, sized in :func:`count_internal_cells`, comes in
+    two kinds. Alike on every platform, it departs from the exact count
+    of centres where an edge runs 1:100 north of east on the plane, the
+    shift's own direction, and keeps its centres on it, and where a
+    centre lies nearer an edge than the shift, at most a micrometre, and
+    changes side, tie or not; on a polygon drawn through cell centroids
+    the second takes an edge longer than about a hundred metres whose
+    lattice direction has no short step, and on any other polygon it is
+    all the shift changes, a few cells at resolution 13. Still decided by
+    the platform's last bits: near the points densification adds to an
+    edge of 505.1 m or more at resolution 13, one kilometre at the
+    others, and near a vertex the move does not reach, which includes
+    the centroids of the border-absorbing cells and the polar caps.
 
     **Densification is applied, not assumed.** A straight edge on the
     plane is not a geodesic, so an undensified long edge fills the wrong
@@ -1792,7 +2140,9 @@ def polyfill(
         )
 
     budget = _Budget()
-    plane, views = _prepare(geometry, resolution, densify=True)
+    plane, views = _prepare(
+        geometry, resolution, densify=True, snap=containment == "center"
+    )
     lattices = dict(views)
     ordered: dict[str, list[str]] = {}
     for quadrant, view in views:
@@ -1801,6 +2151,7 @@ def polyfill(
             base: tuple[int, int, bool],
             _v: "_LatticeView" = view,
             _q: str = quadrant,
+            _s: tuple[float, float] = _tie_shift(quadrant),
         ) -> str | None:
             column, row, border = base
             code = f"{column:0{RES1_DIGITS}d}{RES1_SEPARATOR}{row:0{RES1_DIGITS}d}"
@@ -1826,6 +2177,7 @@ def polyfill(
                 code,
                 compact,
                 budget,
+                _s,
             )
 
         # Sorted by column then row so that the siblings come out in the
@@ -2015,6 +2367,7 @@ def _count_leaves(
     v0: "NDArray[Any]",
     side: float,
     strict: bool,
+    shift: tuple[float, float],
 ) -> int:
     """Answer the target level for many leaves at once, under ``containment="center"``.
 
@@ -2025,8 +2378,11 @@ def _count_leaves(
     the answer: wholly inside implies centre inside implies touching. So,
     unless ``strict``, the centre is asked directly, with
     ``shapely.contains_xy``: the point form of ``contains``, asked of
-    coordinates without building a Point. The centre is
-    ``u0 + side / 2.0``, the expression :func:`_accept_leaf` evaluates.
+    coordinates without building a Point. The centre is moved by
+    ``shift``, the tie-breaking shift of the lattice's frame
+    (:func:`_tie_shift`), as ``u0 + side / 2.0 + du``: the expression
+    :func:`_accept_leaf` evaluates, operation for operation, so that the
+    two descents ask about the same point to the last bit.
 
     The chain is a theorem for a valid geometry only. :func:`_refuse_invalid_area`
     asks for validity of the geometry the caller wrote, not of the lattice
@@ -2044,15 +2400,20 @@ def _count_leaves(
     import numpy as np
     import shapely
 
+    du, dv = shift
     if not strict:
-        inside = shapely.contains_xy(geometry, u0 + side / 2.0, v0 + side / 2.0)
+        inside = shapely.contains_xy(
+            geometry, u0 + side / 2.0 + du, v0 + side / 2.0 + dv
+        )
         return int(np.count_nonzero(inside))
     squares = shapely.box(u0, v0, u0 + side, v0 + side)
     meets = shapely.intersects(geometry, squares)
     u0, v0, squares = u0[meets], v0[meets], squares[meets]
     inside = shapely.contains(geometry, squares)
     crossing = ~inside
-    centres = shapely.points(u0[crossing] + side / 2.0, v0[crossing] + side / 2.0)
+    centres = shapely.points(
+        u0[crossing] + side / 2.0 + du, v0[crossing] + side / 2.0 + dv
+    )
     kept = shapely.contains(geometry, centres)
     return int(np.count_nonzero(inside)) + int(np.count_nonzero(kept))
 
@@ -2065,22 +2426,23 @@ def _count_nodes_batched(
     level: int,
     target: int,
     strict: bool,
+    shift: tuple[float, float],
 ) -> int:
     """Count the target cells under many nodes of one level, a level at a time.
 
     Equal to the sum of :func:`_count_node` over the nodes, with
-    ``containment="center"`` (:func:`_split_level`, :func:`_count_leaves`).
-    The nodes are taken :data:`_COUNT_BATCH` at a time, each batch
-    descended before the next is read, so memory holds one batch per
-    level at most and the recursion is as deep as the resolution
-    difference, never deeper.
+    ``containment="center"`` and the same ``shift``
+    (:func:`_split_level`, :func:`_count_leaves`). The nodes are taken
+    :data:`_COUNT_BATCH` at a time, each batch descended before the next
+    is read, so memory holds one batch per level at most and the
+    recursion is as deep as the resolution difference, never deeper.
     """
     total = 0
     for start in range(0, len(u0), _COUNT_BATCH):
         stop = start + _COUNT_BATCH
         batch_u0, batch_v0 = u0[start:stop], v0[start:stop]
         if level == target:
-            total += _count_leaves(geometry, batch_u0, batch_v0, side, strict)
+            total += _count_leaves(geometry, batch_u0, batch_v0, side, strict, shift)
             continue
         inside, child_u0, child_v0, child = _split_level(
             geometry, batch_u0, batch_v0, side, level, target
@@ -2088,7 +2450,7 @@ def _count_nodes_batched(
         total += inside
         if len(child_u0):
             total += _count_nodes_batched(
-                geometry, child_u0, child_v0, child, level + 1, target, strict
+                geometry, child_u0, child_v0, child, level + 1, target, strict, shift
             )
     return total
 
@@ -2129,21 +2491,33 @@ def _expand_frontier(
 
 
 def _count_chunk_in_process(
-    work: tuple[bytes, "NDArray[Any]", "NDArray[Any]", float, int, int, bool],
+    work: tuple[
+        bytes,
+        "NDArray[Any]",
+        "NDArray[Any]",
+        float,
+        int,
+        int,
+        bool,
+        tuple[float, float],
+    ],
 ) -> int:
     """Worker entry of :func:`_count_ordinary`: one interleaved chunk of the frontier.
 
     Module level so that it pickles by name. The worker rebuilds and
     prepares its own geometry from the WKB, as :class:`_LatticeView` does
     per thread; validity was decided once, in the parent, on the same
-    bytes.
+    bytes. So was the tie-breaking shift, which arrives in the work
+    rather than being read again here: a worker started by ``spawn``
+    imports this module afresh and sees nothing the parent changed after
+    its own import.
     """
     import shapely
 
-    lattice_wkb, u0, v0, side, level, target, strict = work
+    lattice_wkb, u0, v0, side, level, target, strict, shift = work
     geometry = shapely.from_wkb(lattice_wkb)
     shapely.prepare(geometry)
-    return _count_nodes_batched(geometry, u0, v0, side, level, target, strict)
+    return _count_nodes_batched(geometry, u0, v0, side, level, target, strict, shift)
 
 
 def _count_ordinary(
@@ -2151,6 +2525,7 @@ def _count_ordinary(
     bases: list[tuple[int, int]],
     target: int,
     n_jobs: int,
+    shift: tuple[float, float],
 ) -> int:
     """Count the ordinary base cells of one quadrant piece, batched.
 
@@ -2158,7 +2533,9 @@ def _count_ordinary(
     passes to :func:`_count_node` -- ``(column + row) * _L1`` and
     ``row * _L1`` -- evaluated as Python floats before they enter the
     arrays. Validity of the lattice piece is asked here, once, and decides
-    how leaves are answered (:func:`_count_leaves`).
+    how leaves are answered (:func:`_count_leaves`). ``shift`` is the
+    piece's tie-breaking shift (:func:`_tie_shift`), and goes to the
+    workers with the frontier.
 
     With ``n_jobs`` above 1 the descent runs here until its frontier holds
     :data:`_FRONTIER_PER_JOB` nodes per worker; if what is left is worth
@@ -2178,7 +2555,7 @@ def _count_ordinary(
     u0 = np.array([(column + row) * _L1 for column, row in bases], dtype=float)
     v0 = np.array([row * _L1 for _, row in bases], dtype=float)
     if n_jobs == 1:
-        return _count_nodes_batched(geometry, u0, v0, _L1, 1, target, strict)
+        return _count_nodes_batched(geometry, u0, v0, _L1, 1, target, strict, shift)
     total, u0, v0, side, level = _expand_frontier(
         geometry, u0, v0, _L1, 1, target, _FRONTIER_PER_JOB * n_jobs
     )
@@ -2187,11 +2564,11 @@ def _count_ordinary(
         or _estimated_nodes(len(u0), level, target) < _PARALLEL_MIN_NODES
     ):
         return total + _count_nodes_batched(
-            geometry, u0, v0, side, level, target, strict
+            geometry, u0, v0, side, level, target, strict, shift
         )
     chunks = min(_CHUNKS_PER_JOB * n_jobs, len(u0))
     work = [
-        (lattice_wkb, u0[k::chunks], v0[k::chunks], side, level, target, strict)
+        (lattice_wkb, u0[k::chunks], v0[k::chunks], side, level, target, strict, shift)
         for k in range(chunks)
     ]
     with ProcessPoolExecutor(
@@ -2261,7 +2638,7 @@ def _count_internal_cells_recursive(polygon: "Polygon", resolution: int) -> int:
     """
     _check_resolution(resolution)
     total = 0
-    plane, views = _prepare(polygon, resolution, densify=True)
+    plane, views = _prepare(polygon, resolution, densify=True, snap=True)
     lattices = dict(views)
     for quadrant, view in views:
         for column, row, border in _base_cells(
@@ -2273,7 +2650,13 @@ def _count_internal_cells_recursive(polygon: "Polygon", resolution: int) -> int:
                 )
             else:
                 total += _count_node(
-                    view.prepared, (column + row) * _L1, row * _L1, _L1, 1, resolution
+                    view.prepared,
+                    (column + row) * _L1,
+                    row * _L1,
+                    _L1,
+                    1,
+                    resolution,
+                    _tie_shift(quadrant),
                 )
     return total + _count_meridian(plane, lattices, resolution)
 
@@ -2297,6 +2680,110 @@ def count_internal_cells(polygon: "Polygon", resolution: int, n_jobs: int = 1) -
     centre rule the cells the outline crosses are kept or dropped
     according to which side their centre falls, and the two errors
     cancel to first order. The origin counts the same way.
+
+    **A centre on the outline.** ``contains`` is false on the outline, so
+    a centre lying exactly on it would be counted by no polygon: not by
+    this one, and not by its neighbour across the edge. For a polygon
+    drawn through cell centroids that is every vertex and every lattice
+    point along every edge -- a square of 1 000 by 1 000 resolution-13
+    cells counted 998 001, its interior -- and which centres landed
+    exactly on the line, rather than a unit in the last place to either
+    side of it, depended on the C library that computed the projection.
+    So the point tested is the centre moved one micrometre east and ten
+    nanometres north on the sinusoidal plane. A centre on an edge then
+    lies on one side of it, and of two polygons sharing the edge exactly
+    one counts it: west and south edges count the centres on them, east
+    and north edges do not. Counts add up across a shared edge. A centre
+    farther from the outline than the shift, about a micrometre, never
+    changes side; one nearer than that can, tie or not, which is the
+    second case below, and it is what a polygon whose vertices are not
+    cell centres sees of the shift. On one Linux machine, against the
+    rule without it, that moved the count of one of 160 random polygons
+    at resolutions 6 to 10, by one cell, and of 34 of 39 at resolution 13,
+    where a cell is a centimetre wide, by at most six cells in counts of
+    up to two billion.
+
+    **The vertices drawn on the lattice.** The shift settles a centre on
+    the outline only if the outline is where it was drawn. A polygon
+    drawn through cell centroids reaches the plane through the
+    projection, whose last bits differ between C libraries by a few
+    nanometres, and the shift itself puts some centres that close to an
+    edge: a centre the shift's own size from an edge lands on it. So
+    before anything is tested, a projected vertex within a micrometre, in
+    each coordinate, of a point of the five-millimetre plane grid is
+    moved onto that point, and one within a micrometre of a
+    prime-meridian triangle's centroid, a third of a side above the
+    triangle's base, onto that centroid. :func:`polyfill` does the same
+    under ``center``. The grid holds every corner and every centre of an
+    ordinary cell at every resolution, so a polygon drawn through the
+    centroids or the corners of any resolution's cells is read as drawn,
+    with the same numbers on every machine: the move uses only division,
+    rounding to a whole number, multiplication and addition. A corner or
+    centroid this package returns in degrees projects back at most 7.5
+    nanometres from its point, as measured, against the micrometre
+    allowed. Not moved: the centroid of a cell absorbing the domain
+    border or of a polar cap, which the geometry engine computes from the
+    cell's ring, and any vertex not drawn on the lattice, which includes
+    a lattice vertex written with too few decimals: eleven decimals of a
+    degree left one 1.6 micrometres off its point near the antemeridian,
+    while twelve, or a float written out in full, keep every one within
+    reach. A polygon the move makes invalid is refused, as any invalid
+    polygon is, and not repaired.
+
+    **What the rule decides otherwise than the exact count.** The exact
+    count is that of the lattice points a polygon keeps when each is
+    moved an infinitesimal distance in the shift's direction. With the
+    vertices on the lattice and no edge densified, the count departs from
+    it in two cases only, and in both it is the same on every machine,
+    because every number it compares is computed with the operations
+    above, and compared by the geometry engine's robust predicates, which
+    answer one input one way. Measured on one
+    Linux machine with Python 3.13, Shapely 2.2 and GEOS 3.14:
+
+    * *An edge along the shift.* The shift points 1:100 north of east on
+      the plane, and a centre on an edge running that way stays on it
+      after the shift; its side is settled by the rounding of the
+      shifted point, not by the rule. At 22 degrees of latitude, in three
+      quadrants, on edges carrying nine lattice points between their
+      ends, the count departed from the exact one by up to ten cells for
+      edges within 0.053 degrees of that direction, and by none from
+      0.06 degrees on.
+    * *A centre nearer an edge than the shift.* A centre that is not on
+      the outline but nearer to it than the shift's component across the
+      edge, at most a micrometre, changes side; one exactly that far
+      lands on the edge and is a near tie, decided by the arithmetic. On
+      a polygon drawn through cell centroids that takes an edge whose
+      direction on the lattice has no short step: edges of 130 to 500 m
+      with no common factor in their steps moved the count by up to four
+      cells each, and edges up to 80 m by none. On any other polygon it is
+      the whole of what the shift changes, as measured above.
+
+    **What still depends on the machine.** Two things, and both are
+    points the move does not reach:
+
+    * *An edge this function densifies.* The polygon arrives in longitude
+      and latitude, and an edge at least as long as the densification
+      threshold -- 505.1 m at resolution 13, one kilometre at the others
+      -- is read as a geodesic and gains points that are not on the
+      lattice; near them the decision is the platform's again. A polygon
+      whose edges are straight on the plane is counted as drawn only while
+      every edge stays below the threshold, and with a margin, because the
+      length is computed with the C library too. On a square of 20 km at
+      resolution 13, with the C library's results moved by a unit in the
+      last place to stand for four other platforms, a vertex every 400 m
+      kept the count exact on all four, and the corners alone let it move
+      by one cell on three.
+    * *A vertex not on the lattice.* A vertex the move does not reach is
+      where the projection puts it, give or take the last bits, and a
+      centre that lands within a few nanometres of an edge through it is
+      decided by them. Nothing makes that systematic, as a tie does, but
+      at resolution 13 nothing makes it rare either: on average a centre
+      lies within a nanometre of an edge once in fifty kilometres of
+      outline. Of 39 random polygons of 100 to 400 m at resolution 13,
+      with their coordinates moved by a unit in the last place to stand
+      for six other platforms, two moved by one cell, on one or two of
+      the six. The centroids of the border-absorbing cells and the polar
+      caps are vertices of this kind.
 
     **What the residual error is, and what it is not.** The count is
     exact for every cell the outline does not cross, so the area it
@@ -2391,7 +2878,9 @@ def count_internal_cells(polygon: "Polygon", resolution: int, n_jobs: int = 1) -
             processes (see **Workers**). The count does not depend on it.
 
     Returns:
-        Number of cells whose centre lies inside the polygon.
+        Number of cells whose centre lies inside the polygon, a centre on
+        the outline counted on the side the shift sends it to (see **A
+        centre on the outline**).
 
     Raises:
         AntemeridianError: If the polygon crosses 180 degrees outside an
@@ -2406,12 +2895,14 @@ def count_internal_cells(polygon: "Polygon", resolution: int, n_jobs: int = 1) -
     _check_resolution(resolution)
     _check_jobs(n_jobs)
     total = 0
-    plane, views = _prepare(polygon, resolution, densify=True)
+    plane, views = _prepare(polygon, resolution, densify=True, snap=True)
     lattices = dict(views)
     for quadrant, view in views:
         cells = _base_cells(view.prepared, view.geometry, quadrant, resolution)
         ordinary = [(column, row) for column, row, border in cells if not border]
-        total += _count_ordinary(view.geometry, ordinary, resolution, n_jobs)
+        total += _count_ordinary(
+            view.geometry, ordinary, resolution, n_jobs, _tie_shift(quadrant)
+        )
         for column, row, border in cells:
             if border:
                 total += _count_border_cell(

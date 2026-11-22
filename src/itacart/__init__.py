@@ -25,7 +25,7 @@ aligned with :func:`itacart.index.decompose` order.
 
 from __future__ import annotations
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 __paper_doi__ = "10.14393/rbcv77n0a-79281"
 
 # -- Constants --------------------------------------------------------------

@@ -919,30 +919,74 @@ def test_the_reingested_coverage_is_a_reading_of_its_step() -> None:
         assert declared - converged > 5e-4, family
 
 
-def test_center_refuses_the_reingested_outline_only_on_the_declared_row() -> None:
-    """Where the refusal comes from, and where it does not.
+def test_center_does_not_return_the_declared_row_from_the_reingested_outline() -> None:
+    """What ``center`` answers on this row, and why it is never the cell.
 
     Handed the reingested outline of one of these six, ``polyfill`` under
-    ``center`` raises rather than answering an empty cover: the figure that
-    comes back is narrower than a cell and holds no cell centre. Under
-    ``intersects`` the cell is in the answer, together with others the
-    outline touches.
+    ``center`` never answers the cell. For four of them it raises rather
+    than answering an empty cover: the figure that comes back is narrower
+    than a cell and holds no cell centre. For the two absorbers of the
+    eastern quadrants it answers the cap of their own hemisphere, a cell
+    the figure barely reaches. Under ``intersects`` the cell is in the
+    answer, together with others the outline touches.
+
+    The cap comes from the centre rule, and the test asserts the mechanism
+    as well as the answer. The cap's centroid has ``x`` equal to zero, a
+    negative zero as it happens, and every absorber of the row carries an
+    edge along the meridian through it: the centroid lies exactly on the
+    outline, where ``contains`` is false. The centre rule moves a centre a
+    micrometre east before asking, which puts it inside the two eastern
+    figures and outside the two western ones. Before that rule the six
+    all raised; the outline did not change, the rule for a centre on it did.
 
     The control is an ordinary cell, where the same route loses less than a
     thousandth of the figure and ``center`` returns the cell itself. Without
-    it the refusal would read as a property of the route, and it is a
-    property of this row.
+    it the loss would read as a property of the route, and it is a property
+    of this row.
     """
+    from shapely.geometry import Point
+
+    from itacart.geometry import _tie_shift
+
+    east, north = _tie_shift(None)
+    answered: dict[str, list[str]] = {}
+    refused: list[str] = []
     for cell in _cells_of_row(_DECLARED_ROW):
         outline = itacart.cell_to_polygon(cell)
         assert isinstance(outline, Polygon)
-        with pytest.raises(GeometryError, match="narrower than one cell"):
-            itacart.polyfill(outline, 1, containment="center")
+        try:
+            filled = itacart.polyfill(outline, 1, containment="center")
+        except GeometryError as error:
+            assert "narrower than one cell" in str(error), cell
+            refused.append(cell)
+        else:
+            answered[cell] = itacart.decompose(filled)
         touched = itacart.decompose(
             itacart.polyfill(outline, 1, containment="intersects")
         )
         assert cell in touched, cell
         assert len(touched) > 1, cell
+
+        if itacart.absorbs_border(cell):
+            cap = f"{cell[0]}E(0000/1000)"
+            centroid = Polygon(plane_ring(cap)[1]).centroid
+            figure = _reingested(cell)
+            assert centroid.x == 0.0, cell
+            assert figure.boundary.distance(centroid) == 0.0, cell
+            assert not figure.contains(centroid), cell
+            shifted = Point(centroid.x + east, centroid.y + north)
+            assert figure.contains(shifted) == (cell[1] == "E"), cell
+
+    assert answered == {
+        "NE(0001/0999)": [NORTHERN_CAP],
+        "SE(0001/0999)": [SOUTHERN_CAP],
+    }
+    assert refused == [
+        "NE(0000/0999)",
+        "NW(0001/0999)",
+        "SE(0000/0999)",
+        "SW(0001/0999)",
+    ]
 
     for label, cell in (("interior", INTERIOR), ("equator", EQUATOR)):
         outline = itacart.cell_to_polygon(cell)
@@ -1207,8 +1251,18 @@ def test_the_geographic_round_trip_loses_the_row_below_the_pole() -> None:
     The direction that would preserve the shape is the other one --
     sample the straight edge in the plane, then invert the projection --
     and it is an interoperability question rather than a fill one.
+
+    The cell of row 999 comes back as a different cell, the northern cap,
+    and that is the same loss showing through the centre rule. The figure
+    that returns holds no centre of its own row, but it carries an edge
+    along the meridian, and the cap's centroid lies exactly on it. The
+    centre rule moves a centre on an outline a micrometre east before
+    asking, so the eastern figure keeps the cap. Before that rule the trip
+    covered nothing and the fill raised; the trip lost the cell either
+    way.
     """
     exact: list[str] = []
+    elsewhere: dict[str, list[str]] = {}
     refused: dict[str, str] = {}
     for label, cell in NINE_FAMILIES:
         collection = interop.cells_to_geojson(cell)
@@ -1217,7 +1271,10 @@ def test_the_geographic_round_trip_loses_the_row_below_the_pole() -> None:
         except ITACaRTError as error:
             refused[label] = type(error).__name__
             continue
-        assert itacart.decompose(filled[0]) == [cell], label
+        cells = itacart.decompose(filled[0])
+        if cells != [cell]:
+            elsewhere[label] = cells
+            continue
         exact.append(label)
 
     assert exact == [
@@ -1230,10 +1287,12 @@ def test_the_geographic_round_trip_loses_the_row_below_the_pole() -> None:
         "south",
         "west",
     ]
-    # Not refused: reached the fill and covered nothing. The distinction
-    # matters, because a screen turning them away would be a limitation
-    # of the grid's addressing and this is a limitation of the trip.
-    assert refused == {"polar row": "GeometryError"}
+    # Not refused: reached the fill and answered a cell the trip landed on.
+    # The distinction matters, because a screen turning it away would be a
+    # limitation of the grid's addressing and this is a limitation of the
+    # trip. Empty is the stronger pin: a refusal coming back would show.
+    assert elsewhere == {"polar row": [NORTHERN_CAP]}
+    assert refused == {}
 
 
 def test_the_filling_loss_is_measured_rather_than_asserted() -> None:
